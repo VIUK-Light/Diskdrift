@@ -412,22 +412,38 @@ fn snapshot_subcommands_and_history() {
     write_file(&home.join(".ollama/models/a.bin"), 10_000);
     let root = home.to_string_lossy().to_string();
 
-    let s1 = diskdrift(&home, &data, &["snapshot", "--no-progress", "--root", &root]);
+    let s1 = diskdrift(
+        &home,
+        &data,
+        &["snapshot", "--no-progress", "--root", &root],
+    );
     assert!(s1.status.success());
     write_file(&home.join(".ollama/models/b.bin"), 90_000);
-    let s2 = diskdrift(&home, &data, &["snapshot", "--no-progress", "--root", &root]);
+    let s2 = diskdrift(
+        &home,
+        &data,
+        &["snapshot", "--no-progress", "--root", &root],
+    );
     assert!(s2.status.success());
 
     // snapshot list (new spelling) and the legacy `snapshots` command agree.
     let list = diskdrift(&home, &data, &["snapshot", "list", "--json"]);
-    assert!(list.status.success(), "{}", String::from_utf8_lossy(&list.stderr));
+    assert!(
+        list.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list.stderr)
+    );
     assert_eq!(json(&list)["snapshots"].as_array().unwrap().len(), 2);
     let legacy = diskdrift(&home, &data, &["snapshots", "--json"]);
     assert_eq!(json(&legacy)["snapshots"].as_array().unwrap().len(), 2);
 
     // snapshot show
     let show = diskdrift(&home, &data, &["snapshot", "show", "1", "--json"]);
-    assert!(show.status.success(), "{}", String::from_utf8_lossy(&show.stderr));
+    assert!(
+        show.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show.stderr)
+    );
     let v = json(&show);
     assert_eq!(v["snapshot"]["id"], 1);
     assert!(!v["categories"].as_array().unwrap().is_empty());
@@ -436,7 +452,11 @@ fn snapshot_subcommands_and_history() {
 
     // history: both snapshots are today, so one day with no change yet.
     let hist = diskdrift(&home, &data, &["history", "--json"]);
-    assert!(hist.status.success(), "{}", String::from_utf8_lossy(&hist.stderr));
+    assert!(
+        hist.status.success(),
+        "{}",
+        String::from_utf8_lossy(&hist.stderr)
+    );
     let v = json(&hist);
     assert_eq!(v["days"].as_array().unwrap().len(), 1);
     assert!(v["days"][0]["change_bytes"].is_null());
@@ -444,7 +464,11 @@ fn snapshot_subcommands_and_history() {
 
     // category history
     let cat = diskdrift(&home, &data, &["history", "ollama", "--json"]);
-    assert!(cat.status.success(), "{}", String::from_utf8_lossy(&cat.stderr));
+    assert!(
+        cat.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cat.stderr)
+    );
     let v = json(&cat);
     assert_eq!(v["category"]["id"], "ai.ollama");
     assert_eq!(v["days"][0]["logical_bytes"].as_u64().unwrap(), 100_000);
@@ -452,15 +476,27 @@ fn snapshot_subcommands_and_history() {
     let human = diskdrift(&home, &data, &["history", "ollama"]);
     assert!(String::from_utf8_lossy(&human.stdout).contains("Storage History — Ollama"));
 
-    assert!(!diskdrift(&home, &data, &["history", "nonsense"]).status.success());
+    assert!(
+        !diskdrift(&home, &data, &["history", "nonsense"])
+            .status
+            .success()
+    );
 
     // delete requires confirmation in non-interactive sessions
     let refused = diskdrift(&home, &data, &["snapshot", "delete", "1"]);
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("refusing"));
 
-    let del = diskdrift(&home, &data, &["snapshot", "delete", "1", "--yes", "--json"]);
-    assert!(del.status.success(), "{}", String::from_utf8_lossy(&del.stderr));
+    let del = diskdrift(
+        &home,
+        &data,
+        &["snapshot", "delete", "1", "--yes", "--json"],
+    );
+    assert!(
+        del.status.success(),
+        "{}",
+        String::from_utf8_lossy(&del.stderr)
+    );
     assert_eq!(json(&del)["deleted"]["id"], 1);
     let list = diskdrift(&home, &data, &["snapshot", "list", "--json"]);
     assert_eq!(json(&list)["snapshots"].as_array().unwrap().len(), 1);
@@ -473,9 +509,15 @@ fn diff_since_explains_missing_history() {
     let data = tmp.join("data");
     write_file(&home.join(".ollama/models/a.bin"), 1_000);
     let root = home.to_string_lossy().to_string();
-    assert!(diskdrift(&home, &data, &["snapshot", "--no-progress", "--root", &root])
+    assert!(
+        diskdrift(
+            &home,
+            &data,
+            &["snapshot", "--no-progress", "--root", &root]
+        )
         .status
-        .success());
+        .success()
+    );
 
     let out = diskdrift(&home, &data, &["diff", "--since", "7d"]);
     assert!(!out.status.success());
@@ -483,12 +525,14 @@ fn diff_since_explains_missing_history() {
     assert!(stderr.contains("no snapshot is old enough"), "{stderr}");
     assert!(stderr.contains("--since 7d"), "{stderr}");
 
-    assert!(!diskdrift(&home, &data, &["diff", "--since", "7x"]).status.success());
-    assert!(!diskdrift(
-        &home,
-        &data,
-        &["diff", "--since", "7d", "1", "2"]
-    )
-    .status
-    .success());
+    assert!(
+        !diskdrift(&home, &data, &["diff", "--since", "7x"])
+            .status
+            .success()
+    );
+    assert!(
+        !diskdrift(&home, &data, &["diff", "--since", "7d", "1", "2"])
+            .status
+            .success()
+    );
 }
