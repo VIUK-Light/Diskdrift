@@ -106,9 +106,10 @@ Download the archive for your Mac from the
 verify the checksum and install the binary:
 
 ```bash
-shasum -a 256 -c diskdrift-v0.1.0-aarch64-apple-darwin.tar.gz.sha256
-tar -xzf diskdrift-v0.1.0-aarch64-apple-darwin.tar.gz
-sudo install -m 755 diskdrift-v0.1.0-aarch64-apple-darwin/diskdrift /usr/local/bin/diskdrift
+# Replace <version> with the release you downloaded, e.g. 0.2.0
+shasum -a 256 -c diskdrift-v<version>-aarch64-apple-darwin.tar.gz.sha256
+tar -xzf diskdrift-v<version>-aarch64-apple-darwin.tar.gz
+sudo install -m 755 diskdrift-v<version>-aarch64-apple-darwin/diskdrift /usr/local/bin/diskdrift
 ```
 
 The release binaries are unsigned; see the Gatekeeper note below.
@@ -480,7 +481,7 @@ docs/DESIGN.md  architecture and design decisions
 | Version | Theme |
 | --- | --- |
 | v0.1 | Core + scan + snapshot + diff (released) |
-| v0.2 | Better scanner: `top`, path scans, `--depth`, config, more tools (in progress) |
+| v0.2 | Better scanner: `top`, path scans, `--depth`, config, more tools |
 | v0.3 | History: `history`, `diff --since`, snapshot management |
 | v0.4 | Watch: FSEvents-based change monitoring |
 | v0.5 | What happened: turn event history into explanations |
