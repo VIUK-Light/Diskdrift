@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.87"
 description = "Find out where your macOS storage went — read-only storage forensics CLI"
 license = "MIT"
-repository = "https://github.com/shirokuma-xv/diskdrift"
+repository = "https://github.com/VIUK-Light/Diskdrift"
 readme = "README.md"
 
 [dependencies]

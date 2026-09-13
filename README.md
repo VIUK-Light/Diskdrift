@@ -1,7 +1,7 @@
 # DiskDrift
 
-[![CI](https://github.com/shirokuma-xv/diskdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/shirokuma-xv/diskdrift/actions/workflows/ci.yml)
-[![Release](https://github.com/shirokuma-xv/diskdrift/actions/workflows/release.yml/badge.svg)](https://github.com/shirokuma-xv/diskdrift/actions/workflows/release.yml)
+[![CI](https://github.com/VIUK-Light/Diskdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/VIUK-Light/Diskdrift/actions/workflows/ci.yml)
+[![Release](https://github.com/VIUK-Light/Diskdrift/actions/workflows/release.yml/badge.svg)](https://github.com/VIUK-Light/Diskdrift/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Find out where your macOS storage went — safely, locally, and read-only.**
@@ -101,7 +101,7 @@ You can verify the absence of network code yourself:
 ### Prebuilt binaries
 
 Download the archive for your Mac from the
-[Releases](https://github.com/shirokuma-xv/diskdrift/releases) page
+[Releases](https://github.com/VIUK-Light/Diskdrift/releases) page
 (Apple Silicon: `aarch64-apple-darwin`, Intel: `x86_64-apple-darwin`),
 verify the checksum and install the binary:
 
