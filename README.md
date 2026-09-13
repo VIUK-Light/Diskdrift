@@ -420,11 +420,24 @@ tests/          integration tests
 docs/DESIGN.md  architecture and design decisions
 ```
 
-## Roadmap (not in v0.1)
+## Roadmap
 
-FSEvents-based timeline tracking, unusual-growth detection, APFS snapshot
-analysis, reclaimable-space estimation, Homebrew formula, TUI/menu bar app.
-Destructive cleanup is explicitly out of scope.
+| Version | Theme |
+| --- | --- |
+| v0.1 | Core + scan + snapshot + diff (released) |
+| v0.2 | Better scanner: `top`, path scans, `--depth`, config, more tools |
+| v0.3 | History: `history`, `diff --since`, snapshot management |
+| v0.4 | Watch: FSEvents-based change monitoring |
+| v0.5 | What happened: turn event history into explanations |
+| v0.6 | macOS GUI (SwiftUI on top of the core library) |
+| v0.7 | Menu bar app and local storage alerts |
+| v0.8 | Deep macOS storage: APFS snapshots, purgeable space, VM/swap |
+| v0.9 | Duplicates and recommendations |
+| v1.0 | Stable CLI + GUI + menu bar suite |
+
+The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md). Destructive cleanup
+is explicitly out of scope at every stage: DiskDrift is an analyzer, not a
+cleaner.
 
 ## License
 
