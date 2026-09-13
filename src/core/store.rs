@@ -253,6 +253,53 @@ impl Store {
         Ok(out)
     }
 
+    /// All snapshots in ascending (oldest first) order.
+    pub fn all_snapshots(&self) -> Result<Vec<SnapshotMeta>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, created_at, created_at_local, total_logical_bytes, total_allocated_bytes,
+                    file_count, directory_count, symlink_count, skipped_count, duration_ms, app_version
+             FROM snapshots ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map([], row_to_meta)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Resolve `--since <duration>`: the newest snapshot and the newest
+    /// snapshot that is at least `seconds` older than it.
+    pub fn resolve_since(&self, seconds: i64) -> Result<(SnapshotMeta, SnapshotMeta)> {
+        let all = self.all_snapshots()?;
+        let new = all
+            .last()
+            .cloned()
+            .ok_or_else(|| Error::Message("no snapshots stored yet".into()))?;
+        let target = new.unix_time().saturating_sub(seconds);
+        let old = all
+            .iter()
+            .rev()
+            .find(|m| m.unix_time() <= target)
+            .cloned()
+            .ok_or_else(|| {
+                Error::Message(
+                    "no snapshot is old enough to cover that period. Run `diskdrift snapshot` periodically."
+                        .into(),
+                )
+            })?;
+        Ok((old, new))
+    }
+
+    /// Delete a snapshot (and its entries, via foreign key cascade).
+    /// Only DiskDrift's own metadata is removed — never user files.
+    pub fn delete_snapshot(&self, id: i64) -> Result<bool> {
+        let affected = self
+            .conn
+            .execute("DELETE FROM snapshots WHERE id = ?1", params![id])?;
+        Ok(affected > 0)
+    }
+
     pub fn snapshot_by_id(&self, id: i64) -> Result<Option<SnapshotMeta>> {
         let meta = self
             .conn

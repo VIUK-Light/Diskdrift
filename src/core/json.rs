@@ -8,8 +8,9 @@ use crate::core::diff::DiffResult;
 use crate::core::doctor::DoctorReport;
 use crate::core::explain::{ExplainOutput, display_path};
 use crate::core::fs::{self, Accum};
+use crate::core::history::HistoryDay;
 use crate::core::scan::ScanOutput;
-use crate::core::snapshot::SnapshotMeta;
+use crate::core::snapshot::{CatVal, SnapshotMeta};
 use crate::core::time;
 use serde::Serialize;
 use std::path::Path;
@@ -212,6 +213,107 @@ pub fn snapshot(meta: &SnapshotMeta) -> SnapshotJson {
         command: "snapshot",
         timestamp: time::format_local(time::now_unix()),
         snapshot: SnapshotMetaJson::from(meta),
+    }
+}
+
+#[derive(Serialize)]
+pub struct SnapshotShowJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub snapshot: SnapshotMetaJson,
+    pub categories: Vec<CategoryJson>,
+}
+
+pub fn snapshot_show(meta: &SnapshotMeta, rows: &[(usize, CatVal)]) -> SnapshotShowJson {
+    SnapshotShowJson {
+        version: SCHEMA_VERSION,
+        command: "snapshot show",
+        timestamp: time::format_local(time::now_unix()),
+        snapshot: SnapshotMetaJson::from(meta),
+        categories: rows
+            .iter()
+            .map(|(idx, val)| {
+                let def = categories::def_by_index(*idx);
+                CategoryJson {
+                    id: def.id.to_string(),
+                    name: def.name.to_string(),
+                    parent_id: def.parent.map(|p| p.to_string()),
+                    logical_bytes: val.logical,
+                    allocated_bytes: val.allocated,
+                    file_count: val.files,
+                    directory_count: val.dirs,
+                }
+            })
+            .collect(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct SnapshotDeletedJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub deleted: SnapshotMetaJson,
+}
+
+pub fn snapshot_deleted(meta: &SnapshotMeta) -> SnapshotDeletedJson {
+    SnapshotDeletedJson {
+        version: SCHEMA_VERSION,
+        command: "snapshot delete",
+        timestamp: time::format_local(time::now_unix()),
+        deleted: SnapshotMetaJson::from(meta),
+    }
+}
+
+#[derive(Serialize)]
+pub struct HistoryCategoryJson {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct HistoryDayJson {
+    pub date: String,
+    pub snapshot_id: i64,
+    pub snapshot_count: usize,
+    pub allocated_bytes: u64,
+    pub logical_bytes: u64,
+    pub change_bytes: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct HistoryJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub category: Option<HistoryCategoryJson>,
+    pub days: Vec<HistoryDayJson>,
+}
+
+pub fn history(days: &[HistoryDay], category: Option<usize>) -> HistoryJson {
+    HistoryJson {
+        version: SCHEMA_VERSION,
+        command: "history",
+        timestamp: time::format_local(time::now_unix()),
+        category: category.map(|idx| {
+            let def = categories::def_by_index(idx);
+            HistoryCategoryJson {
+                id: def.id.to_string(),
+                name: def.name.to_string(),
+            }
+        }),
+        days: days
+            .iter()
+            .map(|d| HistoryDayJson {
+                date: d.date.clone(),
+                snapshot_id: d.snapshot_id,
+                snapshot_count: d.snapshot_count,
+                allocated_bytes: d.allocated,
+                logical_bytes: d.logical,
+                change_bytes: d.change,
+            })
+            .collect(),
     }
 }
 

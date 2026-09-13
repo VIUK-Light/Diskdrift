@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod error;
 pub mod explain;
 pub mod fs;
+pub mod history;
 pub mod interrupt;
 pub mod json;
 pub mod paths;

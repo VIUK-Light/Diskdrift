@@ -125,6 +125,28 @@ pub fn parse_datetime_prefix(s: &str) -> Option<i64> {
         .map(|days| days * 86_400 + (h as i64) * 3_600 + (mi as i64) * 60 + sec as i64)
 }
 
+/// Parse a duration such as `30s`, `45m`, `24h`, `7d` or `2w`.
+pub fn parse_duration(input: &str) -> Option<i64> {
+    let s = input.trim();
+    if s.len() < 2 {
+        return None;
+    }
+    let (num, unit) = s.split_at(s.len() - 1);
+    let n: i64 = num.parse().ok()?;
+    if n <= 0 {
+        return None;
+    }
+    let multiplier = match unit {
+        "s" => 1,
+        "m" => 60,
+        "h" => 3_600,
+        "d" => 86_400,
+        "w" => 604_800,
+        _ => return None,
+    };
+    n.checked_mul(multiplier)
+}
+
 fn days_from_civil(y: i64, m: u32, d: u32) -> Option<i64> {
     if !(1..=12).contains(&m) {
         return None;
@@ -163,5 +185,18 @@ mod tests {
     fn parse_date_only() {
         let secs = parse_datetime_prefix("1970-01-02").unwrap();
         assert_eq!(secs, 86_400);
+    }
+
+    #[test]
+    fn durations() {
+        assert_eq!(parse_duration("30s"), Some(30));
+        assert_eq!(parse_duration("45m"), Some(2_700));
+        assert_eq!(parse_duration("24h"), Some(86_400));
+        assert_eq!(parse_duration("7d"), Some(604_800));
+        assert_eq!(parse_duration("2w"), Some(1_209_600));
+        assert_eq!(parse_duration(""), None);
+        assert_eq!(parse_duration("7"), None);
+        assert_eq!(parse_duration("7x"), None);
+        assert_eq!(parse_duration("0d"), None);
     }
 }

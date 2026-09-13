@@ -5,9 +5,10 @@ use crate::core::diff::DiffResult;
 use crate::core::doctor::DoctorReport;
 use crate::core::explain::{ExplainOutput, display_path};
 use crate::core::fs;
+use crate::core::history::HistoryDay;
 use crate::core::scan::ScanOutput;
 use crate::core::size;
-use crate::core::snapshot::SnapshotMeta;
+use crate::core::snapshot::{CatVal, SnapshotMeta};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -382,6 +383,71 @@ pub fn render_doctor<W: Write>(w: &mut W, d: &DoctorReport, home: &Path) -> io::
         w,
         "DiskDrift never deletes files and never sends data over the network."
     )?;
+    Ok(())
+}
+
+pub fn render_history<W: Write>(
+    w: &mut W,
+    days: &[HistoryDay],
+    category: Option<&str>,
+) -> io::Result<()> {
+    match category {
+        Some(name) => writeln!(w, "Storage History — {name}")?,
+        None => writeln!(w, "Storage History")?,
+    }
+    writeln!(w)?;
+    if days.is_empty() {
+        writeln!(w, "No history yet. Run `diskdrift snapshot` regularly.")?;
+        return Ok(());
+    }
+    writeln!(w, "{:<12} {:>12} {:>12}", "Date", "Tracked", "Change")?;
+    for day in days {
+        let change = day
+            .change
+            .map(size::format_delta)
+            .unwrap_or_else(|| "-".to_string());
+        writeln!(
+            w,
+            "{:<12} {:>12} {:>12}",
+            day.date,
+            size::format_bytes(day.allocated),
+            change
+        )?;
+    }
+    Ok(())
+}
+
+pub fn render_snapshot_show<W: Write>(
+    w: &mut W,
+    meta: &SnapshotMeta,
+    rows: &[(usize, CatVal)],
+) -> io::Result<()> {
+    writeln!(w, "Snapshot #{}", meta.id)?;
+    writeln!(w)?;
+    writeln!(w, "Created:   {}", display_local(&meta.created_at_local))?;
+    writeln!(
+        w,
+        "Tracked:   {} ({} files, {} directories)",
+        size::format_bytes(meta.total_allocated_bytes),
+        size::format_count(meta.file_count),
+        size::format_count(meta.directory_count)
+    )?;
+    writeln!(
+        w,
+        "Skipped:   {} locations",
+        size::format_count(meta.skipped_count)
+    )?;
+    writeln!(w, "Duration:  {:.1}s", meta.duration_ms as f64 / 1000.0)?;
+    writeln!(w, "DiskDrift: {}", meta.app_version)?;
+
+    if !rows.is_empty() {
+        writeln!(w)?;
+        writeln!(w, "Top categories")?;
+        for (idx, val) in rows {
+            let label = truncate(categories::def_by_index(*idx).name, 30);
+            writeln!(w, "{:<32}{:>12}", label, size::format_bytes(val.allocated))?;
+        }
+    }
     Ok(())
 }
 

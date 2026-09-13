@@ -52,3 +52,10 @@ pub struct DirectoryRow {
     pub category_id: String,
     pub val: CatVal,
 }
+
+impl SnapshotMeta {
+    /// Unix time from `created_at` (stored as UTC RFC 3339).
+    pub fn unix_time(&self) -> i64 {
+        crate::core::time::parse_datetime_prefix(&self.created_at).unwrap_or(0)
+    }
+}

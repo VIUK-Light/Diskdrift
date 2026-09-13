@@ -152,7 +152,12 @@ diskdrift top [<path>] [--depth <n>] [--limit <n>] [--root <path>]...
               [--threads <n>] [--json] [--no-progress]
 diskdrift snapshot [<path>] [--depth <n>] [--root <path>]... [--threads <n>]
                    [--json] [--no-progress]
+diskdrift snapshot list [--json]
+diskdrift snapshot show <id> [--json]
+diskdrift snapshot delete <id> [--yes]
 diskdrift diff [<old>] [<new>] [--json] [--top <n>]
+diskdrift diff --since <duration> [--json] [--top <n>]
+diskdrift history [<category>] [--json]
 diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
 diskdrift doctor [--json]
 diskdrift snapshots [--json]
@@ -259,18 +264,56 @@ Snapshots are stored in SQLite with a schema version and support future
 migrations. A Ctrl+C during the scan cancels the whole operation: partial
 snapshots are never saved.
 
+Snapshot management:
+
+```bash
+diskdrift snapshot list
+diskdrift snapshot show 12
+diskdrift snapshot delete 12 --yes
+```
+
+`snapshot delete` removes only DiskDrift's own metadata — never user files.
+In a terminal it asks for confirmation; without a TTY it requires `--yes`.
+The legacy `diskdrift snapshots` command is an alias of `snapshot list`.
+
 ### diff
 
 ```bash
 diskdrift diff              # latest two snapshots
 diskdrift diff 12 15        # by ID
 diskdrift diff 2026-09-12   # by date prefix, compared against latest
+diskdrift diff --since 24h  # newest snapshot vs the newest one >= 24h older
+diskdrift diff --since 7d
 diskdrift diff foo bar      # invalid tokens are reported clearly
 ```
+
+`--since` accepts durations (`30m`, `24h`, `7d`, `2w`) and fails with a clear
+message when no snapshot is old enough yet.
 
 Display rules: Developer/AI changes are shown as categories; everything else
 is shown as tracked directories. The JSON output contains the full data at
 both category and directory level.
+
+### history
+
+```bash
+diskdrift history           # tracked size per day
+diskdrift history xcode     # one category over time
+```
+
+```text
+Storage History
+
+Date              Tracked       Change
+2026-09-10        284.2 GB            -
+2026-09-11        286.1 GB       +1.9 GB
+2026-09-12        287.4 GB       +1.3 GB
+2026-09-13        304.8 GB      +17.4 GB
+```
+
+When several snapshots land on the same day, the last one represents that
+day and `snapshot_count` reports how many were taken. `--json` exposes the
+same data as `days[]` with `change_bytes` (null for the first day).
 
 ### explain
 

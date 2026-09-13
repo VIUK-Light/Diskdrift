@@ -40,6 +40,32 @@ pub fn format_count(n: u64) -> String {
     out
 }
 
+/// Parse a size such as `500KB`, `50MB`, `1GB` (decimal units) or plain
+/// bytes. Used by `watch --min-change`.
+pub fn parse_size(input: &str) -> Option<u64> {
+    let s = input.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let upper = s.to_uppercase();
+    let (num, unit) = if let Some(n) = upper.strip_suffix("KB") {
+        (n, 1_000u64)
+    } else if let Some(n) = upper.strip_suffix("MB") {
+        (n, 1_000_000)
+    } else if let Some(n) = upper.strip_suffix("GB") {
+        (n, 1_000_000_000)
+    } else if let Some(n) = upper.strip_suffix('B') {
+        (n, 1)
+    } else {
+        (upper.as_str(), 1)
+    };
+    let value: f64 = num.trim().parse().ok()?;
+    if value < 0.0 {
+        return None;
+    }
+    Some((value * unit as f64) as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,6 +83,17 @@ mod tests {
         assert_eq!(format_delta(0), "0 B");
         assert_eq!(format_delta(15_800_000_000), "+15.8 GB");
         assert_eq!(format_delta(-2_400_000_000), "-2.4 GB");
+    }
+
+    #[test]
+    fn sizes() {
+        assert_eq!(parse_size("500KB"), Some(500_000));
+        assert_eq!(parse_size("50mb"), Some(50_000_000));
+        assert_eq!(parse_size("1GB"), Some(1_000_000_000));
+        assert_eq!(parse_size("1234"), Some(1_234));
+        assert_eq!(parse_size("1.5MB"), Some(1_500_000));
+        assert_eq!(parse_size("junk"), None);
+        assert_eq!(parse_size(""), None);
     }
 
     #[test]

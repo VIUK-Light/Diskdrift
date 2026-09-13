@@ -37,6 +37,26 @@ pub struct DiffArgs {
     pub old: Option<String>,
     pub new: Option<String>,
     pub top: usize,
+    pub since: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryArgs {
+    pub common: CommonArgs,
+    pub category: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SnapshotShowArgs {
+    pub common: CommonArgs,
+    pub id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SnapshotDeleteArgs {
+    pub common: CommonArgs,
+    pub id: String,
+    pub yes: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +72,9 @@ pub enum Command {
     Top(TopArgs),
     Snapshot(ScanArgs),
     Diff(DiffArgs),
+    History(HistoryArgs),
+    SnapshotShow(SnapshotShowArgs),
+    SnapshotDelete(SnapshotDeleteArgs),
     Explain(ExplainArgs),
     Doctor(CommonArgs),
     Snapshots(CommonArgs),
@@ -66,19 +89,15 @@ pub fn parse(argv: &[String]) -> Result<Command, String> {
     let cmd = argv[0].as_str();
     let rest = &argv[1..];
     match cmd {
-        "scan" | "snapshot" => match parse_scan_args(rest) {
-            Ok(args) => {
-                if cmd == "scan" {
-                    Ok(Command::Scan(args))
-                } else {
-                    Ok(Command::Snapshot(args))
-                }
-            }
+        "scan" => match parse_scan_args(rest) {
+            Ok(args) => Ok(Command::Scan(args)),
             Err(e) if e == "HELP" => Ok(Command::Help(Some(cmd.to_string()))),
             Err(e) => Err(e),
         },
+        "snapshot" => parse_snapshot(rest),
         "top" => parse_top(rest),
         "diff" => parse_diff(rest),
+        "history" => parse_history(rest),
         "explain" => parse_explain(rest),
         "doctor" => parse_doctor(rest),
         "snapshots" | "list" => parse_snapshots(rest),
@@ -270,6 +289,7 @@ fn parse_diff(rest: &[String]) -> Result<Command, String> {
     let mut common = CommonArgs::default();
     let mut positional: Vec<String> = Vec::new();
     let mut top = 20usize;
+    let mut since: Option<String> = None;
     while let Some((name, inline)) = args.next() {
         if parse_common(&mut args, &name, inline.clone(), &mut common)? {
             continue;
@@ -280,6 +300,15 @@ fn parse_diff(rest: &[String]) -> Result<Command, String> {
                 top = v
                     .parse::<usize>()
                     .map_err(|_| format!("--top expects a number, got '{v}'"))?;
+            }
+            "--since" => {
+                let v = args.value("--since", inline)?;
+                if crate::core::time::parse_duration(&v).is_none() {
+                    return Err(format!(
+                        "--since expects a duration like 24h or 7d, got '{v}'"
+                    ));
+                }
+                since = Some(v);
             }
             "-h" | "--help" => return Ok(Command::Help(Some("diff".into()))),
             other if other.starts_with('-') && other != "-" => {
@@ -294,12 +323,110 @@ fn parse_diff(rest: &[String]) -> Result<Command, String> {
     let mut it = positional.into_iter();
     let old = it.next();
     let new = it.next();
+    if since.is_some() && (old.is_some() || new.is_some()) {
+        return Err("--since cannot be combined with snapshot arguments".into());
+    }
     Ok(Command::Diff(DiffArgs {
         common,
         old,
         new,
         top: top.max(1),
+        since,
     }))
+}
+
+fn parse_history(rest: &[String]) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    let mut category: Option<String> = None;
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "-h" | "--help" => return Ok(Command::Help(Some("history".into()))),
+            other if other.starts_with('-') && other != "-" => {
+                return Err(format!("unknown option '{other}'"));
+            }
+            other => {
+                if category.is_some() {
+                    return Err("history accepts at most one category".into());
+                }
+                category = Some(other.to_string());
+            }
+        }
+    }
+    Ok(Command::History(HistoryArgs { common, category }))
+}
+
+fn parse_snapshot(rest: &[String]) -> Result<Command, String> {
+    let sub = rest.first().map(|s| s.as_str());
+    match sub {
+        Some("list") => parse_snapshots(&rest[1..]),
+        Some("show") => {
+            let mut args = Args::new(&rest[1..]);
+            let mut common = CommonArgs::default();
+            let mut id: Option<String> = None;
+            while let Some((name, inline)) = args.next() {
+                if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+                    continue;
+                }
+                match name.as_str() {
+                    "-h" | "--help" => return Ok(Command::Help(Some("snapshot".into()))),
+                    other if other.starts_with('-') && other != "-" => {
+                        return Err(format!("unknown option '{other}'"));
+                    }
+                    other => {
+                        if id.is_some() {
+                            return Err("snapshot show accepts one snapshot id".into());
+                        }
+                        id = Some(other.to_string());
+                    }
+                }
+            }
+            let id = id.ok_or_else(|| {
+                "missing snapshot id: expected `diskdrift snapshot show <id>`".to_string()
+            })?;
+            Ok(Command::SnapshotShow(SnapshotShowArgs { common, id }))
+        }
+        Some("delete") => {
+            let mut args = Args::new(&rest[1..]);
+            let mut common = CommonArgs::default();
+            let mut id: Option<String> = None;
+            let mut yes = false;
+            while let Some((name, inline)) = args.next() {
+                if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+                    continue;
+                }
+                match name.as_str() {
+                    "--yes" | "-y" => yes = true,
+                    "-h" | "--help" => return Ok(Command::Help(Some("snapshot".into()))),
+                    other if other.starts_with('-') && other != "-" => {
+                        return Err(format!("unknown option '{other}'"));
+                    }
+                    other => {
+                        if id.is_some() {
+                            return Err("snapshot delete accepts one snapshot id".into());
+                        }
+                        id = Some(other.to_string());
+                    }
+                }
+            }
+            let id = id.ok_or_else(|| {
+                "missing snapshot id: expected `diskdrift snapshot delete <id>`".to_string()
+            })?;
+            Ok(Command::SnapshotDelete(SnapshotDeleteArgs {
+                common,
+                id,
+                yes,
+            }))
+        }
+        _ => match parse_scan_args(rest) {
+            Ok(args) => Ok(Command::Snapshot(args)),
+            Err(e) if e == "HELP" => Ok(Command::Help(Some("snapshot".into()))),
+            Err(e) => Err(e),
+        },
+    }
 }
 
 fn parse_explain(rest: &[String]) -> Result<Command, String> {
@@ -381,7 +508,12 @@ Usage:
                 [--threads <n>] [--json] [--no-progress]
   diskdrift snapshot [<path>] [--depth <n>] [--root <path>]... [--threads <n>]
                      [--json] [--no-progress]
+  diskdrift snapshot list [--json]
+  diskdrift snapshot show <id> [--json]
+  diskdrift snapshot delete <id> [--yes]
   diskdrift diff [<old>] [<new>] [--json] [--top <n>]
+  diskdrift diff --since <duration> [--json] [--top <n>]
+  diskdrift history [<category>] [--json]
   diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
   diskdrift doctor [--json]
   diskdrift snapshots [--json]
@@ -389,7 +521,9 @@ Usage:
   diskdrift version
 
 Snapshot arguments for `diff` may be snapshot IDs, "latest", or a date/time
-prefix such as 2026-09-13 or 2026-09-13T16:40.
+prefix such as 2026-09-13 or 2026-09-13T16:40. `--since` accepts durations
+such as 30m, 24h, 7d or 2w and compares the newest snapshot with the newest
+one at least that old.
 
 Global options:
   --data-dir <path>   Override data directory

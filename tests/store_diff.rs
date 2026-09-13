@@ -6,6 +6,7 @@ use common::{TempDir, allocated_bytes, write_file};
 use diskdrift::core::diff;
 use diskdrift::core::scan::{self, ScanConfig};
 use diskdrift::core::store::Store;
+use diskdrift::core::time;
 use diskdrift::scanners;
 use std::path::Path;
 
@@ -132,4 +133,52 @@ fn snapshot_stores_no_file_contents() {
         !bytes.windows(secret.len()).any(|w| w == secret),
         "database must not contain file contents"
     );
+}
+
+#[test]
+fn backdated_snapshots_support_history_and_since() {
+    let tmp = TempDir::new("store-history");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    let file = home.join(".ollama/models/a.bin");
+    write_file(&file, 5_000);
+
+    let mut store = Store::open(&Store::default_path(&data)).unwrap();
+    let now = time::now_unix();
+
+    let mut out1 = scan_home(&home);
+    out1.started_at = now - 8 * 86_400;
+    let m1 = store.insert_snapshot(&out1, "test").unwrap();
+
+    write_file(&file, 20_000);
+    let mut out2 = scan_home(&home);
+    out2.started_at = now - 6 * 86_400;
+    let m2 = store.insert_snapshot(&out2, "test").unwrap();
+
+    write_file(&file, 30_000);
+    let mut out3 = scan_home(&home);
+    out3.started_at = now - 3_600;
+    let m3 = store.insert_snapshot(&out3, "test").unwrap();
+
+    let all = store.all_snapshots().unwrap();
+    assert_eq!(all.len(), 3);
+    assert!(all[0].unix_time() < all[1].unix_time());
+    assert!(all[1].unix_time() < all[2].unix_time());
+
+    // 7 days ago: m1 is old enough, m2 is not.
+    let (old, new) = store.resolve_since(7 * 86_400).unwrap();
+    assert_eq!(old.id, m1.id);
+    assert_eq!(new.id, m3.id);
+
+    // 24 hours: m2 is the newest snapshot older than the cutoff.
+    let (old, new) = store.resolve_since(86_400).unwrap();
+    assert_eq!(old.id, m2.id);
+    assert_eq!(new.id, m3.id);
+
+    // Deleting a snapshot removes its entries (metadata only).
+    assert!(store.delete_snapshot(m2.id).unwrap());
+    assert_eq!(store.all_snapshots().unwrap().len(), 2);
+    assert!(store.snapshot_by_id(m2.id).unwrap().is_none());
+    assert!(store.load_categories(m2.id).unwrap().is_empty());
+    assert!(store.load_directories(m2.id).unwrap().is_empty());
 }
