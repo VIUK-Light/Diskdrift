@@ -179,7 +179,7 @@ are required, and DiskDrift never asks for them.
 ## 7. Snapshot storage
 
 SQLite, at `~/Library/Application Support/DiskDrift/diskdrift.sqlite3`, with
-`PRAGMA user_version` used as the schema version (currently 1).
+`PRAGMA user_version` used as the schema version (currently 2).
 
 ```sql
 metadata(key, value)
@@ -196,6 +196,8 @@ skipped_locations(snapshot_id, path, reason, kind)
 - `snapshots.created_at` is UTC RFC 3339 (sortable); `created_at_local` is for
   display and date-prefix lookup.
 - `scan_entries.kind` is `directory` or `root`.
+- v2 adds `events` (watch change log) and `watch_dirs` (last measured sizes
+  for incremental monitoring).
 - Inserts are one transaction; snapshots are never partially written.
 - Migrations run on open: version 0 creates v1, newer versions are rejected
   with a clear message.
@@ -219,6 +221,30 @@ skipped_locations(snapshot_id, path, reason, kind)
   else as tracked directory rows. JSON contains both full lists.
 
 ---
+
+## 8b. Watch (v0.4)
+
+`diskdrift watch` uses macOS FSEvents (through the `notify` crate, which is
+CC0-licensed and uses the FSEvents backend on macOS).
+
+Pipeline:
+
+```text
+FSEvents -> dirty path queue -> debounce (default 2s)
+         -> map to nearest directory with a known baseline
+         -> collapse descendants -> focused directory scan
+         -> delta vs last known size -> events table
+```
+
+- No full rescan is triggered by an event.
+- A baseline of directory sizes is built once (`--baseline-depth`, default 3,
+  including empty directories), persisted in `watch_dirs` and reused.
+- Paths are canonicalised (`/var` vs `/private/var`) so watcher events,
+  baselines and measurements agree.
+- Events below `--min-change` are ignored; disappearing directories are
+  recorded as negative "removed" events.
+- The pipeline (`process_batch`, `collapse_dirty`, `build_baseline`) is
+  independent of FSEvents and unit-tested with temporary directories.
 
 ## 9. JSON schema (version 1)
 

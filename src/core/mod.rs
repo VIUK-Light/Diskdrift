@@ -15,3 +15,4 @@ pub mod size;
 pub mod snapshot;
 pub mod store;
 pub mod time;
+pub mod watch;

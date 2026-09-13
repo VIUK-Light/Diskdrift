@@ -3,8 +3,11 @@
 mod common;
 
 use common::{TempDir, allocated_bytes, write_file};
+use diskdrift::core::snapshot::EventDraft;
+use diskdrift::core::store::Store;
+use diskdrift::core::time;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn bin() -> &'static str {
@@ -157,7 +160,7 @@ fn doctor_does_not_create_a_database() {
     );
     let v = json(&out);
     assert_eq!(v["version"], 1);
-    assert_eq!(v["database"]["schema_version"], 1);
+    assert_eq!(v["database"]["schema_version"], 2);
     assert_eq!(v["database"]["exists"], false);
     assert!(!data.join("diskdrift.sqlite3").exists());
 }
@@ -535,4 +538,66 @@ fn diff_since_explains_missing_history() {
             .status
             .success()
     );
+}
+
+#[test]
+fn events_json_reads_recorded_events() {
+    let tmp = TempDir::new("cli-events");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    write_file(&home.join(".ollama/models/a.bin"), 1_000);
+
+    let now = time::now_unix();
+    {
+        let mut store = Store::open(&Store::default_path(&data)).unwrap();
+        store
+            .insert_events(&[
+                EventDraft {
+                    timestamp_unix: now - 60,
+                    kind: "grow",
+                    path: home.join(".ollama"),
+                    category_id: "ai.ollama".to_string(),
+                    delta_bytes: 2_000_000,
+                    allocated_bytes: 5_000_000,
+                    file_count: 10,
+                    directory_count: 2,
+                },
+                EventDraft {
+                    timestamp_unix: now - 30,
+                    kind: "shrink",
+                    path: PathBuf::from("/tmp/other"),
+                    category_id: "system.caches".to_string(),
+                    delta_bytes: -1_000,
+                    allocated_bytes: 0,
+                    file_count: 0,
+                    directory_count: 0,
+                },
+            ])
+            .unwrap();
+    }
+
+    let out = diskdrift(&home, &data, &["events", "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["command"], "events");
+    let events = v["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["delta_bytes"].as_i64().unwrap(), 2_000_000);
+    assert!(events[0]["path"].as_str().unwrap().contains(".ollama"));
+
+    let human = diskdrift(&home, &data, &["events"]);
+    assert!(human.status.success());
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("Storage events"), "{text}");
+    assert!(text.contains("+2.0 MB"), "{text}");
+
+    // --since filters by event time.
+    let recent = diskdrift(&home, &data, &["events", "--since", "1h", "--json"]);
+    assert_eq!(json(&recent)["events"].as_array().unwrap().len(), 2);
+    let none = diskdrift(&home, &data, &["events", "--since", "1s", "--json"]);
+    assert_eq!(json(&none)["events"].as_array().unwrap().len(), 0);
 }

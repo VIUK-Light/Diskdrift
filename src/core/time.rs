@@ -147,6 +147,17 @@ pub fn parse_duration(input: &str) -> Option<i64> {
     n.checked_mul(multiplier)
 }
 
+/// Like `parse_duration`, but returns milliseconds and also accepts `ms`
+/// (e.g. `500ms`). Used by `watch --debounce` / `--run-for`.
+pub fn parse_duration_ms(input: &str) -> Option<u64> {
+    let s = input.trim();
+    if let Some(ms) = s.strip_suffix("ms") {
+        let value: u64 = ms.parse().ok()?;
+        return (value > 0).then_some(value);
+    }
+    parse_duration(s).and_then(|secs| (secs as u64).checked_mul(1_000))
+}
+
 fn days_from_civil(y: i64, m: u32, d: u32) -> Option<i64> {
     if !(1..=12).contains(&m) {
         return None;
@@ -198,5 +209,14 @@ mod tests {
         assert_eq!(parse_duration("7"), None);
         assert_eq!(parse_duration("7x"), None);
         assert_eq!(parse_duration("0d"), None);
+    }
+
+    #[test]
+    fn millisecond_durations() {
+        assert_eq!(parse_duration_ms("500ms"), Some(500));
+        assert_eq!(parse_duration_ms("2s"), Some(2_000));
+        assert_eq!(parse_duration_ms("5m"), Some(300_000));
+        assert_eq!(parse_duration_ms("0ms"), None);
+        assert_eq!(parse_duration_ms("nope"), None);
     }
 }

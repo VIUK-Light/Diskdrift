@@ -1,8 +1,8 @@
 //! Command implementations.
 
 use crate::cli::args::{
-    Command, CommonArgs, DiffArgs, ExplainArgs, HistoryArgs, ScanArgs, SnapshotDeleteArgs,
-    SnapshotShowArgs, TopArgs,
+    Command, CommonArgs, DiffArgs, EventsArgs, ExplainArgs, HistoryArgs, ScanArgs,
+    SnapshotDeleteArgs, SnapshotShowArgs, TopArgs, WatchArgs,
 };
 use crate::cli::progress::Progress;
 use crate::cli::render;
@@ -20,11 +20,15 @@ use crate::core::scan::{self, ScanConfig, ScanTarget};
 use crate::core::size;
 use crate::core::store::Store;
 use crate::core::time;
+use crate::core::watch::{self, WatchEntry, WatchState};
 use crate::scanners;
+use notify::{RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::{Duration, Instant};
 
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_ERROR: i32 = 1;
@@ -37,6 +41,8 @@ pub fn run(cmd: Command) -> Result<i32> {
         Command::Snapshot(args) => cmd_snapshot(args),
         Command::Diff(args) => cmd_diff(args),
         Command::History(args) => cmd_history(args),
+        Command::Watch(args) => cmd_watch(args),
+        Command::Events(args) => cmd_events(args),
         Command::SnapshotShow(args) => cmd_snapshot_show(args),
         Command::SnapshotDelete(args) => cmd_snapshot_delete(args),
         Command::Explain(args) => cmd_explain(args),
@@ -388,6 +394,256 @@ fn cmd_history(args: HistoryArgs) -> Result<i32> {
         let stdout = io::stdout();
         let mut w = stdout.lock();
         render::render_history(&mut w, &days, category_name)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
+fn cmd_watch(args: WatchArgs) -> Result<i32> {
+    let home = resolve_home();
+    let data_dir = resolve_data_dir(&args.common, &home);
+    let config = load_config(&args.common, &home)?;
+    let targets = resolve_scan_targets(&home, None, &args.roots)?;
+    // FSEvents reports canonical paths (e.g. /private/var for /var), so all
+    // watcher paths, baseline keys and measurements use canonical paths too.
+    let canonical_targets: Vec<ScanTarget> = targets
+        .iter()
+        .map(|target| {
+            let mut canonical = target.clone();
+            canonical.path =
+                std::fs::canonicalize(&target.path).unwrap_or_else(|_| target.path.clone());
+            canonical
+        })
+        .collect();
+
+    let debounce = Duration::from_millis(match &args.debounce {
+        Some(value) => time::parse_duration_ms(value).ok_or_else(|| {
+            Error::Message(format!("--debounce expects a duration, got '{value}'"))
+        })?,
+        None => 2_000,
+    });
+    let min_change = match &args.min_change {
+        Some(value) => size::parse_size(value)
+            .ok_or_else(|| Error::Message(format!("--min-change expects a size, got '{value}'")))?,
+        None => 1_000_000,
+    };
+    let baseline_depth = args
+        .baseline_depth
+        .or(config.depth)
+        .unwrap_or(3)
+        .clamp(1, crate::core::config::MAX_DEPTH);
+    let run_for = match &args.run_for {
+        Some(value) => Some(time::parse_duration_ms(value).ok_or_else(|| {
+            Error::Message(format!("--run-for expects a duration, got '{value}'"))
+        })?),
+        None => None,
+    };
+    let threads = args
+        .threads
+        .or(config.threads)
+        .unwrap_or_else(scan::default_threads);
+
+    let canonical_home = std::fs::canonicalize(&home).unwrap_or_else(|_| home.clone());
+    let mut exclusions = vec![data_dir.clone()];
+    exclusions.extend(config.exclude.iter().cloned());
+    let exclusions: Vec<PathBuf> = exclusions
+        .iter()
+        .map(|path| std::fs::canonicalize(path).unwrap_or_else(|_| path.clone()))
+        .collect();
+
+    let db_path = Store::default_path(&data_dir);
+    let mut store = Store::open(&db_path)?;
+    let classifier = crate::core::classify::Classifier::new(&canonical_home);
+
+    let mut state: WatchState = store
+        .load_watch_dirs()?
+        .into_iter()
+        .map(|(path, category_id, allocated)| {
+            (
+                path,
+                WatchEntry {
+                    category_id,
+                    allocated,
+                },
+            )
+        })
+        .collect();
+    if state.is_empty() || args.rebaseline {
+        eprintln!("Building baseline...");
+        let (baseline, out) = watch::build_baseline(
+            &canonical_home,
+            &canonical_targets,
+            baseline_depth,
+            threads,
+            &exclusions,
+        );
+        let rows: Vec<(PathBuf, String, u64)> = baseline
+            .iter()
+            .map(|(path, entry)| (path.clone(), entry.category_id.clone(), entry.allocated))
+            .collect();
+        store.upsert_watch_dirs(&rows)?;
+        state = baseline;
+        eprintln!(
+            "Baseline: {} directories, {} tracked in {:.1}s",
+            size::format_count(rows.len() as u64),
+            size::format_bytes(out.walk.totals.allocated),
+            out.duration.as_secs_f64()
+        );
+    } else {
+        eprintln!(
+            "Loaded baseline: {} directories (use --rebaseline to rescan)",
+            size::format_count(state.len() as u64)
+        );
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+    let mut watcher = notify::recommended_watcher(move |res| {
+        let _ = tx.send(res);
+    })
+    .map_err(|e| Error::Message(format!("cannot start filesystem watcher: {e}")))?;
+    for target in &canonical_targets {
+        watcher
+            .watch(&target.path, RecursiveMode::Recursive)
+            .map_err(|e| {
+                Error::Message(format!(
+                    "cannot watch {}: {e}",
+                    paths::display_path(&target.path, &home)
+                ))
+            })?;
+    }
+    eprintln!(
+        "Watching {} locations (debounce {}ms, min change {}). Press Ctrl+C to stop.",
+        canonical_targets.len(),
+        debounce.as_millis(),
+        size::format_bytes(min_change)
+    );
+
+    let started = Instant::now();
+    let mut pending: Vec<PathBuf> = Vec::new();
+    let mut last_event = Instant::now();
+    let mut recorded = 0u64;
+
+    loop {
+        if crate::core::interrupt::interrupted() {
+            break;
+        }
+        if let Some(limit) = run_for {
+            if started.elapsed().as_millis() as u64 >= limit {
+                break;
+            }
+        }
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(Ok(event)) => {
+                for path in event.paths {
+                    pending.push(dirty_path_for(&path));
+                }
+                last_event = Instant::now();
+            }
+            Ok(Err(_)) => {}
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+
+        if !pending.is_empty() && last_event.elapsed() >= debounce {
+            let dirty = std::mem::take(&mut pending);
+            let outcome = watch::process_batch(
+                &dirty,
+                &canonical_home,
+                &classifier,
+                &mut state,
+                min_change,
+                threads,
+                &exclusions,
+                time::now_unix(),
+            );
+            if !outcome.events.is_empty() {
+                store.insert_events(&outcome.events)?;
+                store.upsert_watch_dirs(&outcome.updated)?;
+                store.delete_watch_dirs(&outcome.removed)?;
+                recorded += outcome.events.len() as u64;
+                for event in &outcome.events {
+                    print_watch_event(event, &home, args.common.json)?;
+                }
+            }
+        }
+    }
+
+    eprintln!(
+        "Stopped. {} event(s) recorded. See `diskdrift events`.",
+        size::format_count(recorded)
+    );
+    Ok(if crate::core::interrupt::interrupted() {
+        EXIT_INTERRUPTED
+    } else {
+        EXIT_OK
+    })
+}
+
+fn dirty_path_for(path: &Path) -> PathBuf {
+    // FSEvents reports both files and directories, using canonical paths.
+    // Files are measured through their parent directory; deleted paths fall
+    // back to the (canonicalised) parent.
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        if canonical.is_dir() {
+            return canonical;
+        }
+        return canonical
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or(canonical);
+    }
+    match path.parent() {
+        Some(parent) => std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf()),
+        None => path.to_path_buf(),
+    }
+}
+
+fn print_watch_event(
+    event: &crate::core::snapshot::EventDraft,
+    home: &Path,
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", json::to_json_line(&json::watch_event(event, home)));
+    } else {
+        let time = time::format_local(event.timestamp_unix);
+        let short = time.get(11..16).unwrap_or("--:--");
+        println!(
+            "{short}  {}  {}",
+            paths::display_path(&event.path, home),
+            size::format_delta(event.delta_bytes)
+        );
+    }
+    Ok(())
+}
+
+fn cmd_events(args: EventsArgs) -> Result<i32> {
+    let home = resolve_home();
+    let data_dir = resolve_data_dir(&args.common, &home);
+    let db_path = Store::default_path(&data_dir);
+    if !db_path.exists() {
+        return Err(Error::Message(
+            "no event database found. Run `diskdrift watch` first.".into(),
+        ));
+    }
+    let store = Store::open(&db_path)?;
+    let since = match &args.since {
+        Some(value) => Some(
+            time::now_unix()
+                - time::parse_duration(value).ok_or_else(|| {
+                    Error::Message(format!("--since expects a duration, got '{value}'"))
+                })?,
+        ),
+        None => None,
+    };
+    let events = store.recent_events(since, args.limit)?;
+
+    if args.common.json {
+        println!("{}", json::to_pretty(&json::events(&events, since, &home)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_events(&mut w, &events, &home)?;
         w.flush()?;
     }
     Ok(EXIT_OK)

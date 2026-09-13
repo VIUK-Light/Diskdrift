@@ -47,6 +47,25 @@ pub struct HistoryArgs {
 }
 
 #[derive(Debug, Clone)]
+pub struct WatchArgs {
+    pub common: CommonArgs,
+    pub roots: Vec<PathBuf>,
+    pub debounce: Option<String>,
+    pub min_change: Option<String>,
+    pub baseline_depth: Option<usize>,
+    pub rebaseline: bool,
+    pub run_for: Option<String>,
+    pub threads: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EventsArgs {
+    pub common: CommonArgs,
+    pub since: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct SnapshotShowArgs {
     pub common: CommonArgs,
     pub id: String,
@@ -73,6 +92,8 @@ pub enum Command {
     Snapshot(ScanArgs),
     Diff(DiffArgs),
     History(HistoryArgs),
+    Watch(WatchArgs),
+    Events(EventsArgs),
     SnapshotShow(SnapshotShowArgs),
     SnapshotDelete(SnapshotDeleteArgs),
     Explain(ExplainArgs),
@@ -98,6 +119,8 @@ pub fn parse(argv: &[String]) -> Result<Command, String> {
         "top" => parse_top(rest),
         "diff" => parse_diff(rest),
         "history" => parse_history(rest),
+        "watch" => parse_watch(rest),
+        "events" => parse_events(rest),
         "explain" => parse_explain(rest),
         "doctor" => parse_doctor(rest),
         "snapshots" | "list" => parse_snapshots(rest),
@@ -359,6 +382,111 @@ fn parse_history(rest: &[String]) -> Result<Command, String> {
     Ok(Command::History(HistoryArgs { common, category }))
 }
 
+fn parse_watch(rest: &[String]) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    let mut roots = Vec::new();
+    let mut debounce = None;
+    let mut min_change = None;
+    let mut baseline_depth = None;
+    let mut rebaseline = false;
+    let mut run_for = None;
+    let mut threads = None;
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "--root" => roots.push(PathBuf::from(args.value("--root", inline)?)),
+            "--debounce" => {
+                let v = args.value("--debounce", inline)?;
+                if crate::core::time::parse_duration_ms(&v).is_none() {
+                    return Err(format!(
+                        "--debounce expects a duration like 2s or 500ms, got '{v}'"
+                    ));
+                }
+                debounce = Some(v);
+            }
+            "--min-change" => {
+                let v = args.value("--min-change", inline)?;
+                if crate::core::size::parse_size(&v).is_none() {
+                    return Err(format!(
+                        "--min-change expects a size like 10MB or 1GB, got '{v}'"
+                    ));
+                }
+                min_change = Some(v);
+            }
+            "--baseline-depth" => {
+                baseline_depth = Some(parse_count(
+                    &mut args,
+                    "--baseline-depth",
+                    inline,
+                    1,
+                    crate::core::config::MAX_DEPTH,
+                )?);
+            }
+            "--rebaseline" => rebaseline = true,
+            "--run-for" => {
+                let v = args.value("--run-for", inline)?;
+                if crate::core::time::parse_duration_ms(&v).is_none() {
+                    return Err(format!(
+                        "--run-for expects a duration like 10s or 5m, got '{v}'"
+                    ));
+                }
+                run_for = Some(v);
+            }
+            "--threads" => {
+                threads = Some(parse_count(&mut args, "--threads", inline, 1, 1024)?);
+            }
+            "-h" | "--help" => return Ok(Command::Help(Some("watch".into()))),
+            other => return Err(format!("unknown option '{other}'")),
+        }
+    }
+    Ok(Command::Watch(WatchArgs {
+        common,
+        roots,
+        debounce,
+        min_change,
+        baseline_depth,
+        rebaseline,
+        run_for,
+        threads,
+    }))
+}
+
+fn parse_events(rest: &[String]) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    let mut since = None;
+    let mut limit = 50usize;
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "--since" => {
+                let v = args.value("--since", inline)?;
+                if crate::core::time::parse_duration(&v).is_none() {
+                    return Err(format!(
+                        "--since expects a duration like 24h or 7d, got '{v}'"
+                    ));
+                }
+                since = Some(v);
+            }
+            "--limit" => {
+                limit = parse_count(&mut args, "--limit", inline, 1, 100_000)?;
+            }
+            "-h" | "--help" => return Ok(Command::Help(Some("events".into()))),
+            other => return Err(format!("unknown option '{other}'")),
+        }
+    }
+    Ok(Command::Events(EventsArgs {
+        common,
+        since,
+        limit,
+    }))
+}
+
 fn parse_snapshot(rest: &[String]) -> Result<Command, String> {
     let sub = rest.first().map(|s| s.as_str());
     match sub {
@@ -514,6 +642,10 @@ Usage:
   diskdrift diff [<old>] [<new>] [--json] [--top <n>]
   diskdrift diff --since <duration> [--json] [--top <n>]
   diskdrift history [<category>] [--json]
+  diskdrift watch [--root <path>]... [--debounce <duration>]
+                  [--min-change <size>] [--baseline-depth <n>] [--rebaseline]
+                  [--run-for <duration>] [--threads <n>] [--json]
+  diskdrift events [--since <duration>] [--limit <n>] [--json]
   diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
   diskdrift doctor [--json]
   diskdrift snapshots [--json]
@@ -632,6 +764,51 @@ mod tests {
             Command::Scan(a) => assert_eq!(a.common.config, Some(PathBuf::from("/tmp/dd.toml"))),
             _ => panic!("wrong command"),
         }
+    }
+
+    #[test]
+    fn parses_watch() {
+        let cmd = parse(&args(&[
+            "watch",
+            "--debounce",
+            "500ms",
+            "--min-change",
+            "10MB",
+            "--run-for",
+            "5m",
+            "--baseline-depth",
+            "4",
+            "--rebaseline",
+            "--root",
+            "/tmp/x",
+        ]))
+        .unwrap();
+        match cmd {
+            Command::Watch(a) => {
+                assert_eq!(a.debounce.as_deref(), Some("500ms"));
+                assert_eq!(a.min_change.as_deref(), Some("10MB"));
+                assert_eq!(a.run_for.as_deref(), Some("5m"));
+                assert_eq!(a.baseline_depth, Some(4));
+                assert!(a.rebaseline);
+                assert_eq!(a.roots, vec![PathBuf::from("/tmp/x")]);
+            }
+            _ => panic!("wrong command"),
+        }
+        assert!(parse(&args(&["watch", "--debounce", "nope"])).is_err());
+        assert!(parse(&args(&["watch", "--min-change", "nope"])).is_err());
+    }
+
+    #[test]
+    fn parses_events() {
+        let cmd = parse(&args(&["events", "--since", "24h", "--limit", "10"])).unwrap();
+        match cmd {
+            Command::Events(a) => {
+                assert_eq!(a.since.as_deref(), Some("24h"));
+                assert_eq!(a.limit, 10);
+            }
+            _ => panic!("wrong command"),
+        }
+        assert!(parse(&args(&["events", "--since", "yesterday"])).is_err());
     }
 
     #[test]

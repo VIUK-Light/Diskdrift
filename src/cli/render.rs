@@ -8,7 +8,7 @@ use crate::core::fs;
 use crate::core::history::HistoryDay;
 use crate::core::scan::ScanOutput;
 use crate::core::size;
-use crate::core::snapshot::{CatVal, SnapshotMeta};
+use crate::core::snapshot::{CatVal, EventRow, SnapshotMeta};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -383,6 +383,30 @@ pub fn render_doctor<W: Write>(w: &mut W, d: &DoctorReport, home: &Path) -> io::
         w,
         "DiskDrift never deletes files and never sends data over the network."
     )?;
+    Ok(())
+}
+
+pub fn render_events<W: Write>(w: &mut W, events: &[EventRow], home: &Path) -> io::Result<()> {
+    writeln!(w, "Storage events")?;
+    writeln!(w)?;
+    if events.is_empty() {
+        writeln!(
+            w,
+            "No events recorded yet. Run `diskdrift watch` to start monitoring."
+        )?;
+        return Ok(());
+    }
+    for event in events {
+        let time = event.timestamp_local.get(11..16).unwrap_or("--:--");
+        let label = truncate(&display_path(&event.path, home), 52);
+        writeln!(
+            w,
+            "{}  {:<54}{:>12}",
+            time,
+            label,
+            size::format_delta(event.delta_bytes)
+        )?;
+    }
     Ok(())
 }
 

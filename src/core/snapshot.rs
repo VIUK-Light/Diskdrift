@@ -59,3 +59,31 @@ impl SnapshotMeta {
         crate::core::time::parse_datetime_prefix(&self.created_at).unwrap_or(0)
     }
 }
+
+/// A change event recorded by `diskdrift watch`.
+#[derive(Debug, Clone)]
+pub struct EventDraft {
+    pub timestamp_unix: i64,
+    /// "grow" | "shrink" | "removed"
+    pub kind: &'static str,
+    pub path: std::path::PathBuf,
+    pub category_id: String,
+    pub delta_bytes: i64,
+    pub allocated_bytes: u64,
+    pub file_count: u64,
+    pub directory_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct EventRow {
+    pub id: i64,
+    pub timestamp_unix: i64,
+    pub timestamp_local: String,
+    pub kind: String,
+    pub path: std::path::PathBuf,
+    pub category_id: String,
+    pub delta_bytes: i64,
+    pub allocated_bytes: u64,
+    pub file_count: u64,
+    pub directory_count: u64,
+}

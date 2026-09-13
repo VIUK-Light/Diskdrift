@@ -158,6 +158,10 @@ diskdrift snapshot delete <id> [--yes]
 diskdrift diff [<old>] [<new>] [--json] [--top <n>]
 diskdrift diff --since <duration> [--json] [--top <n>]
 diskdrift history [<category>] [--json]
+diskdrift watch [--root <path>]... [--debounce <duration>] [--min-change <size>]
+                [--baseline-depth <n>] [--rebaseline] [--run-for <duration>]
+                [--threads <n>] [--json]
+diskdrift events [--since <duration>] [--limit <n>] [--json]
 diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
 diskdrift doctor [--json]
 diskdrift snapshots [--json]
@@ -314,6 +318,56 @@ Date              Tracked       Change
 When several snapshots land on the same day, the last one represents that
 day and `snapshot_count` reports how many were taken. `--json` exposes the
 same data as `days[]` with `change_bytes` (null for the first day).
+
+### watch
+
+```bash
+diskdrift watch
+diskdrift watch --root ~/Library --debounce 1s --min-change 50MB
+```
+
+```text
+Building baseline...
+Watching 15 locations (debounce 2000ms, min change 1.0 MB). Press Ctrl+C to stop.
+14:22  ~/Library/Developer/CoreSimulator  +1.2 GB
+14:27  ~/Library/Developer/CoreSimulator  +3.8 GB
+18:13  ~/.ollama  +4.7 GB
+Stopped. 3 event(s) recorded. See `diskdrift events`.
+```
+
+`watch` uses macOS FSEvents. It never rescans everything per event:
+
+```text
+filesystem event -> directory queue -> debounce -> affected directory scan
+                 -> compare with last known size -> store event
+```
+
+- Events are debounced (default 2 s) and only changes above `--min-change`
+  (default 1 MB) are recorded.
+- Dirty paths are mapped to the nearest directory with a known baseline, so
+  files and new subdirectories are handled without a full scan.
+- The baseline is built once, persisted in the database and reused on the
+  next run; use `--rebaseline` to rebuild it.
+- `--run-for 10m` makes it exit automatically (useful for scripts);
+  `--json` prints one event object per line (JSON Lines).
+
+### events
+
+```bash
+diskdrift events
+diskdrift events --since 24h --limit 20
+```
+
+```text
+Storage events
+
+14:22  ~/Library/Developer/CoreSimulator                    +1.2 GB
+14:27  ~/Library/Developer/CoreSimulator                    +3.8 GB
+18:13  ~/.ollama                                            +4.7 GB
+```
+
+Events are stored as metadata only (time, path, category, byte delta) in the
+same local SQLite database. `events` reads them; it never touches files.
 
 ### explain
 
@@ -496,6 +550,10 @@ trade-offs.
   `logical_bytes` and `allocated_bytes`.
 - Snapshot entries are tracked at a bounded depth below each scan root
   (usually 1–2 levels) for diffing; `explain` does a live scan for detail.
+- `watch` only records changes that happen while it is running; it does not
+  replay events from before it started, and events are reported at directory
+  granularity, not per file. Deep paths without a baseline are compared
+  against their nearest known directory.
 
 ## Development
 

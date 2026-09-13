@@ -10,7 +10,7 @@ use crate::core::explain::{ExplainOutput, display_path};
 use crate::core::fs::{self, Accum};
 use crate::core::history::HistoryDay;
 use crate::core::scan::ScanOutput;
-use crate::core::snapshot::{CatVal, SnapshotMeta};
+use crate::core::snapshot::{CatVal, EventDraft, EventRow, SnapshotMeta};
 use crate::core::time;
 use serde::Serialize;
 use std::path::Path;
@@ -617,6 +617,98 @@ pub fn top(out: &ScanOutput, limit: usize) -> TopJson {
         totals: TotalsJson::from(&out.walk.totals),
         directories,
     }
+}
+
+#[derive(Serialize)]
+pub struct EventJson {
+    pub id: i64,
+    pub timestamp: String,
+    pub timestamp_unix: i64,
+    pub kind: String,
+    pub path: String,
+    pub category_id: String,
+    pub delta_bytes: i64,
+    pub allocated_bytes: u64,
+    pub file_count: u64,
+    pub directory_count: u64,
+}
+
+fn event_from_row(event: &EventRow, home: &Path) -> EventJson {
+    EventJson {
+        id: event.id,
+        timestamp: event.timestamp_local.clone(),
+        timestamp_unix: event.timestamp_unix,
+        kind: event.kind.clone(),
+        path: display_path(&event.path, home),
+        category_id: event.category_id.clone(),
+        delta_bytes: event.delta_bytes,
+        allocated_bytes: event.allocated_bytes,
+        file_count: event.file_count,
+        directory_count: event.directory_count,
+    }
+}
+
+#[derive(Serialize)]
+pub struct EventsJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub since_unix: Option<i64>,
+    pub events: Vec<EventJson>,
+}
+
+pub fn events(rows: &[EventRow], since_unix: Option<i64>, home: &Path) -> EventsJson {
+    EventsJson {
+        version: SCHEMA_VERSION,
+        command: "events",
+        timestamp: time::format_local(time::now_unix()),
+        since_unix,
+        events: rows.iter().map(|e| event_from_row(e, home)).collect(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct WatchEventJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub event: WatchEventInnerJson,
+}
+
+#[derive(Serialize)]
+pub struct WatchEventInnerJson {
+    pub timestamp: String,
+    pub timestamp_unix: i64,
+    pub kind: &'static str,
+    pub path: String,
+    pub category_id: String,
+    pub delta_bytes: i64,
+    pub allocated_bytes: u64,
+    pub file_count: u64,
+    pub directory_count: u64,
+}
+
+pub fn watch_event(event: &EventDraft, home: &Path) -> WatchEventJson {
+    WatchEventJson {
+        version: SCHEMA_VERSION,
+        command: "watch",
+        timestamp: time::format_local(time::now_unix()),
+        event: WatchEventInnerJson {
+            timestamp: time::format_local(event.timestamp_unix),
+            timestamp_unix: event.timestamp_unix,
+            kind: event.kind,
+            path: display_path(&event.path, home),
+            category_id: event.category_id.clone(),
+            delta_bytes: event.delta_bytes,
+            allocated_bytes: event.allocated_bytes,
+            file_count: event.file_count,
+            directory_count: event.directory_count,
+        },
+    }
+}
+
+pub fn to_json_line<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"))
 }
 
 pub fn to_pretty<T: Serialize>(value: &T) -> String {

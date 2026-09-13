@@ -5,6 +5,7 @@ mod common;
 use common::{TempDir, allocated_bytes, write_file};
 use diskdrift::core::diff;
 use diskdrift::core::scan::{self, ScanConfig};
+use diskdrift::core::snapshot::EventDraft;
 use diskdrift::core::store::Store;
 use diskdrift::core::time;
 use diskdrift::scanners;
@@ -35,7 +36,7 @@ fn snapshot_roundtrip_diff_and_resolution() {
 
     let db_path = Store::default_path(&data);
     let mut store = Store::open(&db_path).expect("open store");
-    assert_eq!(store.schema_version().unwrap(), 1);
+    assert_eq!(store.schema_version().unwrap(), 2);
 
     let out1 = scan_home(&home);
     let m1 = store.insert_snapshot(&out1, "test").unwrap();
@@ -181,4 +182,63 @@ fn backdated_snapshots_support_history_and_since() {
     assert!(store.snapshot_by_id(m2.id).unwrap().is_none());
     assert!(store.load_categories(m2.id).unwrap().is_empty());
     assert!(store.load_directories(m2.id).unwrap().is_empty());
+}
+
+#[test]
+fn events_and_watch_dirs_round_trip() {
+    let tmp = TempDir::new("store-events");
+    let data = tmp.join("data");
+    let mut store = Store::open(&Store::default_path(&data)).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 2);
+
+    let drafts = vec![
+        EventDraft {
+            timestamp_unix: 1_000,
+            kind: "grow",
+            path: tmp.join("a"),
+            category_id: "ai.ollama".to_string(),
+            delta_bytes: 12_345,
+            allocated_bytes: 99_999,
+            file_count: 3,
+            directory_count: 1,
+        },
+        EventDraft {
+            timestamp_unix: 2_000,
+            kind: "shrink",
+            path: tmp.join("b"),
+            category_id: "system.caches".to_string(),
+            delta_bytes: -500,
+            allocated_bytes: 1_000,
+            file_count: 2,
+            directory_count: 0,
+        },
+    ];
+    store.insert_events(&drafts).unwrap();
+
+    let rows = store.recent_events(None, 10).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].timestamp_unix, 1_000);
+    assert_eq!(rows[1].delta_bytes, -500);
+    assert_eq!(rows[1].category_id, "system.caches");
+
+    let filtered = store.recent_events(Some(1_500), 10).unwrap();
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].timestamp_unix, 2_000);
+
+    // Newest N, returned oldest-first.
+    let limited = store.recent_events(None, 1).unwrap();
+    assert_eq!(limited.len(), 1);
+    assert_eq!(limited[0].timestamp_unix, 2_000);
+
+    // watch_dirs upsert and delete
+    let row = (tmp.join("dir"), "system.caches".to_string(), 111u64);
+    store.upsert_watch_dirs(std::slice::from_ref(&row)).unwrap();
+    store
+        .upsert_watch_dirs(&[(tmp.join("dir"), "system.caches".to_string(), 222)])
+        .unwrap();
+    let dirs = store.load_watch_dirs().unwrap();
+    assert_eq!(dirs.len(), 1);
+    assert_eq!(dirs[0].2, 222);
+    store.delete_watch_dirs(&[tmp.join("dir")]).unwrap();
+    assert!(store.load_watch_dirs().unwrap().is_empty());
 }

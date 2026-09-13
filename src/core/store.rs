@@ -6,12 +6,14 @@
 use crate::core::categories;
 use crate::core::error::{Error, Result};
 use crate::core::scan::ScanOutput;
-use crate::core::snapshot::{CatVal, CategoryRow, DirectoryRow, SnapshotMeta};
+use crate::core::snapshot::{
+    CatVal, CategoryRow, DirectoryRow, EventDraft, EventRow, SnapshotMeta,
+};
 use crate::core::time;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 pub const DB_FILE_NAME: &str = "diskdrift.sqlite3";
 
 const SCHEMA_V1: &str = r#"
@@ -62,6 +64,28 @@ CREATE TABLE IF NOT EXISTS skipped_locations (
 );
 "#;
 
+const SCHEMA_V2: &str = r#"
+CREATE TABLE IF NOT EXISTS events (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp_unix    INTEGER NOT NULL,
+    timestamp_local   TEXT    NOT NULL,
+    kind              TEXT    NOT NULL,
+    path              TEXT    NOT NULL,
+    category_id       TEXT    NOT NULL,
+    delta_bytes       INTEGER NOT NULL,
+    allocated_bytes   INTEGER NOT NULL,
+    file_count        INTEGER NOT NULL DEFAULT 0,
+    directory_count   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_events_time ON events(timestamp_unix);
+CREATE TABLE IF NOT EXISTS watch_dirs (
+    path           TEXT    PRIMARY KEY,
+    category_id    TEXT    NOT NULL,
+    allocated_bytes INTEGER NOT NULL,
+    updated_at_unix INTEGER NOT NULL
+);
+"#;
+
 pub struct Store {
     conn: Connection,
     path: PathBuf,
@@ -105,6 +129,9 @@ impl Store {
         }
         if version < 1 {
             self.conn.execute_batch(SCHEMA_V1)?;
+        }
+        if version < 2 {
+            self.conn.execute_batch(SCHEMA_V2)?;
         }
         self.conn
             .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
@@ -452,6 +479,133 @@ impl Store {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    // --- watch events -----------------------------------------------------
+
+    pub fn insert_events(&mut self, drafts: &[EventDraft]) -> Result<()> {
+        if drafts.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO events
+                 (timestamp_unix, timestamp_local, kind, path, category_id,
+                  delta_bytes, allocated_bytes, file_count, directory_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )?;
+            for d in drafts {
+                stmt.execute(params![
+                    d.timestamp_unix,
+                    time::format_local(d.timestamp_unix),
+                    d.kind,
+                    d.path.to_string_lossy(),
+                    d.category_id,
+                    d.delta_bytes,
+                    d.allocated_bytes as i64,
+                    d.file_count as i64,
+                    d.directory_count as i64,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Newest `limit` events (optionally since a unix time), oldest first.
+    pub fn recent_events(&self, since_unix: Option<i64>, limit: usize) -> Result<Vec<EventRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, timestamp_unix, timestamp_local, kind, path, category_id,
+                    delta_bytes, allocated_bytes, file_count, directory_count
+             FROM (
+                 SELECT * FROM events
+                 WHERE (?1 IS NULL OR timestamp_unix >= ?1)
+                 ORDER BY timestamp_unix DESC, id DESC
+                 LIMIT ?2
+             )
+             ORDER BY timestamp_unix ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![since_unix, limit as i64], |r| {
+            Ok(EventRow {
+                id: r.get(0)?,
+                timestamp_unix: r.get(1)?,
+                timestamp_local: r.get(2)?,
+                kind: r.get(3)?,
+                path: PathBuf::from(r.get::<_, String>(4)?),
+                category_id: r.get(5)?,
+                delta_bytes: r.get(6)?,
+                allocated_bytes: r.get::<_, i64>(7)? as u64,
+                file_count: r.get::<_, i64>(8)? as u64,
+                directory_count: r.get::<_, i64>(9)? as u64,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn load_watch_dirs(&self) -> Result<Vec<(PathBuf, String, u64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, category_id, allocated_bytes FROM watch_dirs")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                PathBuf::from(r.get::<_, String>(0)?),
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)? as u64,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn upsert_watch_dirs(&mut self, rows: &[(PathBuf, String, u64)]) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let now = time::now_unix();
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO watch_dirs(path, category_id, allocated_bytes, updated_at_unix)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(path) DO UPDATE SET
+                   category_id = excluded.category_id,
+                   allocated_bytes = excluded.allocated_bytes,
+                   updated_at_unix = excluded.updated_at_unix",
+            )?;
+            for (path, category, allocated) in rows {
+                stmt.execute(params![
+                    path.to_string_lossy(),
+                    category,
+                    *allocated as i64,
+                    now
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_watch_dirs(&mut self, paths: &[PathBuf]) -> Result<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare("DELETE FROM watch_dirs WHERE path = ?1")?;
+            for path in paths {
+                stmt.execute(params![path.to_string_lossy()])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn db_size_bytes(&self) -> u64 {
