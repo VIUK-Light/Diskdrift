@@ -1,5 +1,9 @@
 # DiskDrift
 
+[![CI](https://github.com/shirokuma-xv/diskdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/shirokuma-xv/diskdrift/actions/workflows/ci.yml)
+[![Release](https://github.com/shirokuma-xv/diskdrift/actions/workflows/release.yml/badge.svg)](https://github.com/shirokuma-xv/diskdrift/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Find out where your macOS storage went — safely, locally, and read-only.**
 
 DiskDrift is a free, open-source CLI that answers the question macOS Storage
@@ -93,6 +97,21 @@ You can verify the absence of network code yourself:
 ---
 
 ## Installation
+
+### Prebuilt binaries
+
+Download the archive for your Mac from the
+[Releases](https://github.com/shirokuma-xv/diskdrift/releases) page
+(Apple Silicon: `aarch64-apple-darwin`, Intel: `x86_64-apple-darwin`),
+verify the checksum and install the binary:
+
+```bash
+shasum -a 256 -c diskdrift-v0.1.0-aarch64-apple-darwin.tar.gz.sha256
+tar -xzf diskdrift-v0.1.0-aarch64-apple-darwin.tar.gz
+sudo install -m 755 diskdrift-v0.1.0-aarch64-apple-darwin/diskdrift /usr/local/bin/diskdrift
+```
+
+The release binaries are unsigned; see the Gatekeeper note below.
 
 ### Build from source (recommended)
 
