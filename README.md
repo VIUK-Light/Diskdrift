@@ -145,8 +145,12 @@ xattr -d com.apple.quarantine ./diskdrift
 ## Commands
 
 ```text
-diskdrift scan [--json] [--no-progress] [--verbose] [--root <path>]... [--threads <n>]
-diskdrift snapshot [--json] [--no-progress] [--root <path>]... [--threads <n>]
+diskdrift scan [<path>] [--depth <n>] [--root <path>]... [--threads <n>]
+               [--json] [--no-progress] [--verbose]
+diskdrift top [<path>] [--depth <n>] [--limit <n>] [--root <path>]...
+              [--threads <n>] [--json] [--no-progress]
+diskdrift snapshot [<path>] [--depth <n>] [--root <path>]... [--threads <n>]
+                   [--json] [--no-progress]
 diskdrift diff [<old>] [<new>] [--json] [--top <n>]
 diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
 diskdrift doctor [--json]
@@ -163,9 +167,12 @@ Global options:
 | `--no-progress` | Disable the live progress display |
 | `--verbose` | Show skipped location details |
 | `--data-dir <path>` | Override the data directory |
+| `--config <path>` | Configuration file (default: `~/.config/diskdrift/config.toml`) |
 | `--root <path>` | Scan a specific path instead of the default locations (repeatable) |
+| `--depth <n>` | Directory tracking depth, 1–8 (default: per-location, usually 2) |
 | `--threads <n>` | Walker parallelism (default: auto, capped at 8) |
 | `--top <n>` | Number of diff rows (default: 20) |
+| `--limit <n>` | Number of rows for `top` (default: 20) |
 
 Environment variables:
 
@@ -173,11 +180,14 @@ Environment variables:
 | --- | --- |
 | `DISKDRIFT_DATA_DIR` | Override the data directory |
 | `DISKDRIFT_HOME` | Override the home directory used for scan locations |
+| `DISKDRIFT_CONFIG` | Override the configuration file path |
 
 ### scan
 
 ```bash
-diskdrift scan
+diskdrift scan                  # default locations
+diskdrift scan ~/Downloads      # one specific path
+diskdrift scan --depth 4        # deeper directory tracking
 ```
 
 ```text
@@ -204,7 +214,30 @@ Detected total             63.2 GB
 Scanned 496,668 files, 89,283 directories in 7.6s (8 threads)
 ```
 
-`scan` never writes to the database.
+`scan` never writes to the database. When a path or `--depth` is given, a
+`Largest directories` section is added so the extra depth is actually
+visible.
+
+### top
+
+```bash
+diskdrift top
+diskdrift top ~/Library --depth 4 --limit 10
+```
+
+```text
+Largest directories
+
+Scanned 64.4 GB in 6.4s
+
+   1.  17.1 GB  ~/Library/Containers/629C1EE0-…
+   2.   6.0 GB  ~/Library/Developer/Xcode/iOS DeviceSupport
+   3.   2.4 GB  ~/Library/Developer/CoreSimulator/Devices
+   4.   2.4 GB  ~/Library/Group Containers/VUTU7AKEUR.jp.naver.line.mac
+   5.   1.8 GB  ~/.lmstudio/models
+```
+
+`top` answers "what is big right now?" in one command.
 
 ### snapshot
 
@@ -333,14 +366,17 @@ Developer
 ├── Xcode (DerivedData, CoreSimulator, Archives, DeviceSupport)
 ├── Homebrew
 ├── Docker
+├── OrbStack
 ├── npm
 ├── pnpm
+├── Yarn
 └── Other Developer Data
 
 AI Models
 ├── Ollama
 ├── Hugging Face
 ├── LM Studio
+├── MLX
 └── Other Models
 
 Applications
@@ -354,6 +390,25 @@ System/User Data
 ├── Temporary Data
 └── Other
 ```
+
+## Configuration
+
+Optional configuration lives at `~/.config/diskdrift/config.toml`
+(`$XDG_CONFIG_HOME/diskdrift/config.toml` when set, or `--config <path>`):
+
+```toml
+# Never scan or snapshot these paths (in addition to DiskDrift's own
+# database, which is always excluded).
+exclude = ["~/Downloads", "/Volumes/External"]
+
+# Defaults; command-line flags always win.
+threads = 4
+depth = 3
+```
+
+A missing default config file is fine. If the file exists but is invalid,
+commands report the parse error; `diskdrift doctor` shows the status and the
+configured exclusions.
 
 ## Implementation language
 
@@ -425,7 +480,7 @@ docs/DESIGN.md  architecture and design decisions
 | Version | Theme |
 | --- | --- |
 | v0.1 | Core + scan + snapshot + diff (released) |
-| v0.2 | Better scanner: `top`, path scans, `--depth`, config, more tools |
+| v0.2 | Better scanner: `top`, path scans, `--depth`, config, more tools (in progress) |
 | v0.3 | History: `history`, `diff --since`, snapshot management |
 | v0.4 | Watch: FSEvents-based change monitoring |
 | v0.5 | What happened: turn event history into explanations |

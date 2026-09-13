@@ -20,6 +20,7 @@ pub fn render_scan<W: Write>(
     out: &ScanOutput,
     home: &Path,
     verbose: bool,
+    show_directories: bool,
 ) -> io::Result<()> {
     let rolled = fs::rollup_categories(&out.walk.categories);
 
@@ -96,6 +97,23 @@ pub fn render_scan<W: Write>(
         )?;
     }
 
+    if show_directories {
+        let rows = directory_rows(out, 10);
+        if !rows.is_empty() {
+            writeln!(w)?;
+            writeln!(w, "Largest directories")?;
+            for (i, (path, bytes)) in rows.iter().enumerate() {
+                writeln!(
+                    w,
+                    "  {:>2}. {:>12}  {}",
+                    i + 1,
+                    size::format_bytes(*bytes),
+                    display_path(path, home)
+                )?;
+            }
+        }
+    }
+
     if out.walk.interrupted {
         writeln!(w)?;
         writeln!(w, "Interrupted — results may be incomplete.")?;
@@ -111,6 +129,51 @@ pub fn render_scan<W: Write>(
         "because of APFS clones, APFS snapshots and purgeable space."
     )?;
     writeln!(w, "DiskDrift is read-only and never deletes files.")?;
+    Ok(())
+}
+
+fn directory_rows(out: &ScanOutput, limit: usize) -> Vec<(&Path, u64)> {
+    let mut rows: Vec<(&Path, u64)> = out
+        .walk
+        .directories
+        .iter()
+        .filter(|(_, d)| d.acc.allocated > 0)
+        .map(|(p, d)| (p.as_path(), d.acc.allocated))
+        .collect();
+    rows.sort_by_key(|(_, bytes)| std::cmp::Reverse(*bytes));
+    rows.truncate(limit.max(1));
+    rows
+}
+
+pub fn render_top<W: Write>(
+    w: &mut W,
+    out: &ScanOutput,
+    home: &Path,
+    limit: usize,
+) -> io::Result<()> {
+    writeln!(w, "Largest directories")?;
+    writeln!(w)?;
+    writeln!(
+        w,
+        "Scanned {} in {:.1}s",
+        size::format_bytes(out.walk.totals.allocated),
+        out.duration.as_secs_f64()
+    )?;
+    writeln!(w)?;
+    let rows = directory_rows(out, limit);
+    if rows.is_empty() {
+        writeln!(w, "No directories with data were found.")?;
+        return Ok(());
+    }
+    for (i, (path, bytes)) in rows.iter().enumerate() {
+        writeln!(
+            w,
+            "{:>4}. {:>12}  {}",
+            i + 1,
+            size::format_bytes(*bytes),
+            display_path(path, home)
+        )?;
+    }
     Ok(())
 }
 
@@ -242,6 +305,24 @@ pub fn render_doctor<W: Write>(w: &mut W, d: &DoctorReport, home: &Path) -> io::
     writeln!(w, "  snapshots: {}", d.snapshot_count)?;
     if !d.db_writable {
         writeln!(w, "  WARNING: database is not writable")?;
+    }
+
+    writeln!(w)?;
+    writeln!(w, "Configuration")?;
+    writeln!(
+        w,
+        "  {} ({})",
+        display_path(&d.config_path, home),
+        if let Some(err) = &d.config_error {
+            format!("error: {err}")
+        } else if d.config_exists {
+            "loaded".to_string()
+        } else {
+            "not present".to_string()
+        }
+    )?;
+    for path in &d.excluded {
+        writeln!(w, "  exclude: {}", display_path(path, home))?;
     }
 
     if let Some(meta) = &d.latest {

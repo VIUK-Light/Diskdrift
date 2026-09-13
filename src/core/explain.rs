@@ -97,6 +97,7 @@ pub fn explain_category(
         threads,
         progress,
         exclusions: exclusions.to_vec(),
+        depth_override: None,
     });
     let rolled = crate::core::fs::rollup_categories(&out.walk.categories);
     let total = rolled[idx];
@@ -220,6 +221,7 @@ pub fn explain_path(
         threads,
         progress,
         exclusions: exclusions.to_vec(),
+        depth_override: None,
     });
 
     // Group tracked directories by their first component below the query path.

@@ -22,6 +22,8 @@ pub struct ScanConfig<'a> {
     pub progress: Option<&'a ProgressCounters>,
     /// Paths that must never be scanned (e.g. DiskDrift's own database).
     pub exclusions: Vec<PathBuf>,
+    /// Override the per-target directory tracking depth (`scan --depth`).
+    pub depth_override: Option<usize>,
 }
 
 pub struct ScanOutput {
@@ -72,7 +74,12 @@ pub fn prepare_targets(mut specs: Vec<ScanTarget>) -> (Vec<ScanTarget>, Vec<Path
 pub fn run(config: ScanConfig<'_>) -> ScanOutput {
     let started_at = time::now_unix();
     let classifier = Classifier::new(config.home);
-    let (targets, missing_targets) = prepare_targets(config.targets);
+    let (mut targets, missing_targets) = prepare_targets(config.targets);
+    if let Some(depth) = config.depth_override {
+        for target in &mut targets {
+            target.tracked_depth = depth;
+        }
+    }
     let walk_targets: Vec<fs::WalkTarget> = targets
         .iter()
         .map(|t| fs::WalkTarget {

@@ -9,13 +9,26 @@ pub struct CommonArgs {
     pub no_progress: bool,
     pub verbose: bool,
     pub data_dir: Option<PathBuf>,
+    pub config: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ScanArgs {
     pub common: CommonArgs,
     pub roots: Vec<PathBuf>,
+    pub path: Option<PathBuf>,
     pub threads: Option<usize>,
+    pub depth: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TopArgs {
+    pub common: CommonArgs,
+    pub roots: Vec<PathBuf>,
+    pub path: Option<PathBuf>,
+    pub threads: Option<usize>,
+    pub depth: Option<usize>,
+    pub limit: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +49,7 @@ pub struct ExplainArgs {
 #[derive(Debug, Clone)]
 pub enum Command {
     Scan(ScanArgs),
+    Top(TopArgs),
     Snapshot(ScanArgs),
     Diff(DiffArgs),
     Explain(ExplainArgs),
@@ -63,6 +77,7 @@ pub fn parse(argv: &[String]) -> Result<Command, String> {
             Err(e) if e == "HELP" => Ok(Command::Help(Some(cmd.to_string()))),
             Err(e) => Err(e),
         },
+        "top" => parse_top(rest),
         "diff" => parse_diff(rest),
         "explain" => parse_explain(rest),
         "doctor" => parse_doctor(rest),
@@ -122,16 +137,38 @@ fn parse_common(
         "--data-dir" => {
             common.data_dir = Some(PathBuf::from(args.value(name, inline)?));
         }
+        "--config" => {
+            common.config = Some(PathBuf::from(args.value(name, inline)?));
+        }
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+fn parse_count(
+    args: &mut Args<'_>,
+    flag: &str,
+    inline: Option<String>,
+    min: usize,
+    max: usize,
+) -> Result<usize, String> {
+    let v = args.value(flag, inline)?;
+    let n = v
+        .parse::<usize>()
+        .map_err(|_| format!("{flag} expects a number, got '{v}'"))?;
+    if n < min || n > max {
+        return Err(format!("{flag} must be between {min} and {max}"));
+    }
+    Ok(n)
 }
 
 fn parse_scan_args(rest: &[String]) -> Result<ScanArgs, String> {
     let mut args = Args::new(rest);
     let mut common = CommonArgs::default();
     let mut roots = Vec::new();
+    let mut path: Option<PathBuf> = None;
     let mut threads = None;
+    let mut depth = None;
     while let Some((name, inline)) = args.next() {
         if parse_common(&mut args, &name, inline.clone(), &mut common)? {
             continue;
@@ -139,24 +176,93 @@ fn parse_scan_args(rest: &[String]) -> Result<ScanArgs, String> {
         match name.as_str() {
             "--root" => roots.push(PathBuf::from(args.value("--root", inline)?)),
             "--threads" => {
-                let v = args.value("--threads", inline)?;
-                threads = Some(
-                    v.parse::<usize>()
-                        .map_err(|_| format!("--threads expects a number, got '{v}'"))?,
-                );
+                threads = Some(parse_count(&mut args, "--threads", inline, 1, 1024)?);
+            }
+            "--depth" => {
+                depth = Some(parse_count(
+                    &mut args,
+                    "--depth",
+                    inline,
+                    1,
+                    crate::core::config::MAX_DEPTH,
+                )?);
             }
             "-h" | "--help" => return Err("HELP".into()),
-            other => return Err(format!("unknown option '{other}'")),
+            other if other.starts_with('-') && other != "-" => {
+                return Err(format!("unknown option '{other}'"));
+            }
+            other => {
+                if path.is_some() {
+                    return Err("scan accepts at most one path".into());
+                }
+                path = Some(PathBuf::from(other));
+            }
         }
     }
-    if threads == Some(0) {
-        return Err("--threads must be at least 1".into());
+    if path.is_some() && !roots.is_empty() {
+        return Err("use either a path argument or --root, not both".into());
     }
     Ok(ScanArgs {
         common,
         roots,
+        path,
         threads,
+        depth,
     })
+}
+
+fn parse_top(rest: &[String]) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    let mut roots = Vec::new();
+    let mut path: Option<PathBuf> = None;
+    let mut threads = None;
+    let mut depth = None;
+    let mut limit = 20usize;
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "--root" => roots.push(PathBuf::from(args.value("--root", inline)?)),
+            "--threads" => {
+                threads = Some(parse_count(&mut args, "--threads", inline, 1, 1024)?);
+            }
+            "--depth" => {
+                depth = Some(parse_count(
+                    &mut args,
+                    "--depth",
+                    inline,
+                    1,
+                    crate::core::config::MAX_DEPTH,
+                )?);
+            }
+            "--limit" => {
+                limit = parse_count(&mut args, "--limit", inline, 1, 1000)?;
+            }
+            "-h" | "--help" => return Ok(Command::Help(Some("top".into()))),
+            other if other.starts_with('-') && other != "-" => {
+                return Err(format!("unknown option '{other}'"));
+            }
+            other => {
+                if path.is_some() {
+                    return Err("top accepts at most one path".into());
+                }
+                path = Some(PathBuf::from(other));
+            }
+        }
+    }
+    if path.is_some() && !roots.is_empty() {
+        return Err("use either a path argument or --root, not both".into());
+    }
+    Ok(Command::Top(TopArgs {
+        common,
+        roots,
+        path,
+        threads,
+        depth,
+        limit,
+    }))
 }
 
 fn parse_diff(rest: &[String]) -> Result<Command, String> {
@@ -269,8 +375,12 @@ pub fn usage() -> &'static str {
     r#"DiskDrift — find out where your macOS storage went.
 
 Usage:
-  diskdrift scan [--json] [--no-progress] [--verbose] [--root <path>]... [--threads <n>]
-  diskdrift snapshot [--json] [--no-progress] [--root <path>]... [--threads <n>]
+  diskdrift scan [<path>] [--depth <n>] [--root <path>]... [--threads <n>]
+                 [--json] [--no-progress] [--verbose]
+  diskdrift top [<path>] [--depth <n>] [--limit <n>] [--root <path>]...
+                [--threads <n>] [--json] [--no-progress]
+  diskdrift snapshot [<path>] [--depth <n>] [--root <path>]... [--threads <n>]
+                     [--json] [--no-progress]
   diskdrift diff [<old>] [<new>] [--json] [--top <n>]
   diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
   diskdrift doctor [--json]
@@ -284,13 +394,19 @@ prefix such as 2026-09-13 or 2026-09-13T16:40.
 Global options:
   --data-dir <path>   Override data directory
                       (default: ~/Library/Application Support/DiskDrift)
+  --config <path>     Configuration file
+                      (default: ~/.config/diskdrift/config.toml)
   --json              Machine-readable output (schema version 1)
   --no-progress       Disable the live progress display
   --verbose           Show skipped location details
+  --root <path>       Scan a specific path instead of the default locations
+  --depth <n>         Directory tracking depth (1-8)
+  --threads <n>       Walker parallelism (default: auto, capped at 8)
 
 Environment:
   DISKDRIFT_DATA_DIR  Override data directory
   DISKDRIFT_HOME      Override home directory used for scan locations
+  DISKDRIFT_CONFIG    Override configuration file path
 
 DiskDrift is read-only. It never deletes files and never uses the network.
 "#
@@ -344,6 +460,44 @@ mod tests {
             parse(&args(&["explain", "xcode"])).unwrap(),
             Command::Explain(_)
         ));
+    }
+
+    #[test]
+    fn parses_scan_path_and_depth() {
+        let cmd = parse(&args(&["scan", "~/Library", "--depth", "3"])).unwrap();
+        match cmd {
+            Command::Scan(a) => {
+                assert_eq!(a.path, Some(PathBuf::from("~/Library")));
+                assert_eq!(a.depth, Some(3));
+            }
+            _ => panic!("wrong command"),
+        }
+        assert!(parse(&args(&["scan", "/a", "/b"])).is_err());
+        assert!(parse(&args(&["scan", "/a", "--root", "/b"])).is_err());
+        assert!(parse(&args(&["scan", "--depth", "0"])).is_err());
+        assert!(parse(&args(&["scan", "--depth", "9"])).is_err());
+    }
+
+    #[test]
+    fn parses_top() {
+        let cmd = parse(&args(&["top", "/tmp", "--limit", "5", "--depth=2"])).unwrap();
+        match cmd {
+            Command::Top(a) => {
+                assert_eq!(a.path, Some(PathBuf::from("/tmp")));
+                assert_eq!(a.limit, 5);
+                assert_eq!(a.depth, Some(2));
+            }
+            _ => panic!("wrong command"),
+        }
+    }
+
+    #[test]
+    fn parses_config_flag() {
+        let cmd = parse(&args(&["scan", "--config", "/tmp/dd.toml"])).unwrap();
+        match cmd {
+            Command::Scan(a) => assert_eq!(a.common.config, Some(PathBuf::from("/tmp/dd.toml"))),
+            _ => panic!("wrong command"),
+        }
     }
 
     #[test]

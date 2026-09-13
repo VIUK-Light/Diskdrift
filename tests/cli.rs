@@ -12,10 +12,18 @@ fn bin() -> &'static str {
 }
 
 fn diskdrift(home: &Path, data: &Path, args: &[&str]) -> Output {
+    // Keep tests independent from any real user configuration. The config
+    // lives next to the data directory, outside the scanned home tree.
+    let config = data.with_file_name("test-config.toml");
+    if !config.exists() {
+        std::fs::create_dir_all(home).ok();
+        std::fs::write(&config, "").ok();
+    }
     Command::new(bin())
         .args(args)
         .env("DISKDRIFT_HOME", home)
         .env("DISKDRIFT_DATA_DIR", data)
+        .env("DISKDRIFT_CONFIG", &config)
         .output()
         .expect("failed to run diskdrift")
 }
@@ -206,4 +214,192 @@ fn help_and_version() {
     let version = diskdrift(&home, &data, &["version"]);
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).contains("diskdrift"));
+}
+
+#[test]
+fn top_lists_largest_directories() {
+    let tmp = TempDir::new("cli-top");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    write_file(&home.join(".ollama/models/a.bin"), 50_000);
+    write_file(&home.join("Library/Caches/small/x.bin"), 1_000);
+    let root = home.to_string_lossy().to_string();
+
+    let out = diskdrift(
+        &home,
+        &data,
+        &[
+            "top",
+            "--json",
+            "--no-progress",
+            "--root",
+            &root,
+            "--limit",
+            "5",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "top failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["command"], "top");
+    let dirs = v["directories"].as_array().unwrap();
+    assert!(!dirs.is_empty());
+    assert!(dirs.len() <= 5);
+    assert!(
+        dirs[0]["path"].as_str().unwrap().contains(".ollama"),
+        "largest directory should be the ollama model dir: {dirs:?}"
+    );
+
+    let human = diskdrift(&home, &data, &["top", "--no-progress", "--root", &root]);
+    assert!(human.status.success());
+    assert!(String::from_utf8_lossy(&human.stdout).contains("Largest directories"));
+}
+
+#[test]
+fn scan_path_limits_scope_to_that_path() {
+    let tmp = TempDir::new("cli-scan-path");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    let project = home.join("project-a");
+    write_file(&project.join("big.bin"), 30_000);
+    write_file(&home.join("project-b/other.bin"), 10_000);
+
+    let out = diskdrift(
+        &home,
+        &data,
+        &["scan", "--json", "--no-progress", project.to_str().unwrap()],
+    );
+    assert!(
+        out.status.success(),
+        "scan failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["totals"]["logical_bytes"].as_u64().unwrap(), 30_000);
+    assert_eq!(v["totals"]["file_count"].as_u64().unwrap(), 1);
+
+    // Missing paths are reported instead of silently scanning nothing.
+    let missing = diskdrift(
+        &home,
+        &data,
+        &["scan", "--no-progress", home.join("nope").to_str().unwrap()],
+    );
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("cannot access"));
+}
+
+#[test]
+fn scan_depth_controls_directory_buckets() {
+    let tmp = TempDir::new("cli-depth");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    let file = home.join("Library/Caches/Google/Chrome/c.bin");
+    write_file(&file, 1_000);
+    let root = home.to_string_lossy().to_string();
+
+    let shallow = diskdrift(
+        &home,
+        &data,
+        &[
+            "scan",
+            "--json",
+            "--no-progress",
+            "--root",
+            &root,
+            "--depth",
+            "3",
+        ],
+    );
+    assert!(shallow.status.success());
+    let v = json(&shallow);
+    let paths: Vec<String> = v["directories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["path"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        paths.iter().any(|p| p.ends_with("Library/Caches/Google")),
+        "depth 3 should bucket at .../Google: {paths:?}"
+    );
+
+    let deep = diskdrift(
+        &home,
+        &data,
+        &[
+            "scan",
+            "--json",
+            "--no-progress",
+            "--root",
+            &root,
+            "--depth",
+            "4",
+        ],
+    );
+    assert!(deep.status.success());
+    let v = json(&deep);
+    let paths: Vec<String> = v["directories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["path"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.ends_with("Library/Caches/Google/Chrome")),
+        "depth 4 should bucket at .../Chrome: {paths:?}"
+    );
+}
+
+#[test]
+fn config_exclusions_are_applied() {
+    let tmp = TempDir::new("cli-config");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    write_file(&home.join(".ollama/models/a.bin"), 20_000);
+    write_file(&home.join("Library/Caches/Google/c.bin"), 1_000);
+    let config = data.with_file_name("test-config.toml");
+    std::fs::write(
+        &config,
+        format!("exclude = [\"{}\"]\n", home.join(".ollama").display()),
+    )
+    .unwrap();
+    let root = home.to_string_lossy().to_string();
+
+    let out = diskdrift(
+        &home,
+        &data,
+        &["scan", "--json", "--no-progress", "--root", &root],
+    );
+    assert!(
+        out.status.success(),
+        "scan failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["totals"]["logical_bytes"].as_u64().unwrap(), 1_000);
+    let ids: Vec<&str> = v["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    assert!(
+        !ids.contains(&"ai.ollama"),
+        "excluded data must not appear: {ids:?}"
+    );
+
+    // A broken config is reported by doctor instead of crashing.
+    std::fs::write(&config, "depth = 99\n").unwrap();
+    let doctor = diskdrift(&home, &data, &["doctor", "--json"]);
+    assert!(doctor.status.success());
+    let v = json(&doctor);
+    assert!(
+        v["config"]["error"].as_str().is_some(),
+        "expected config error"
+    );
 }

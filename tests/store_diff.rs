@@ -20,6 +20,7 @@ fn scan_home(home: &Path) -> scan::ScanOutput {
         threads: 2,
         progress: None,
         exclusions: Vec::new(),
+        depth_override: None,
     })
 }
 

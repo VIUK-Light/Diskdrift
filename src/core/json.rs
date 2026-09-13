@@ -113,21 +113,7 @@ pub fn scan(out: &ScanOutput) -> ScanJson {
     }
     categories_out.sort_by_key(|c| std::cmp::Reverse(c.allocated_bytes));
 
-    let mut directories_out: Vec<DirectoryJson> = out
-        .walk
-        .directories
-        .iter()
-        .filter(|(_, d)| !d.acc.is_zero())
-        .map(|(path, d)| DirectoryJson {
-            path: path.to_string_lossy().to_string(),
-            category_id: categories::def_by_index(d.category).id.to_string(),
-            logical_bytes: d.acc.logical,
-            allocated_bytes: d.acc.allocated,
-            file_count: d.acc.files,
-            directory_count: d.acc.dirs,
-        })
-        .collect();
-    directories_out.sort_by_key(|d| std::cmp::Reverse(d.allocated_bytes));
+    let directories_out = directory_list(out);
 
     let roots = out
         .targets
@@ -426,12 +412,21 @@ pub struct DoctorLocationJson {
 }
 
 #[derive(Serialize)]
+pub struct DoctorConfigJson {
+    pub path: String,
+    pub exists: bool,
+    pub error: Option<String>,
+    pub exclude: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct DoctorJson {
     pub version: u32,
     pub command: &'static str,
     pub timestamp: String,
     pub data_dir: String,
     pub database: DoctorDatabaseJson,
+    pub config: DoctorConfigJson,
     pub snapshot_count: i64,
     pub latest_snapshot: Option<SnapshotMetaJson>,
     pub locations: Vec<DoctorLocationJson>,
@@ -459,6 +454,12 @@ pub fn doctor(d: &DoctorReport, home: &Path) -> DoctorJson {
             writable: d.db_writable,
             schema_version: d.schema_version,
         },
+        config: DoctorConfigJson {
+            path: display_path(&d.config_path, home),
+            exists: d.config_exists,
+            error: d.config_error.clone(),
+            exclude: d.excluded.iter().map(|p| display_path(p, home)).collect(),
+        },
         snapshot_count: d.snapshot_count,
         latest_snapshot: d.latest.as_ref().map(SnapshotMetaJson::from),
         locations: d.locations.iter().map(loc).collect(),
@@ -473,6 +474,46 @@ pub fn doctor(d: &DoctorReport, home: &Path) -> DoctorJson {
             })
             .collect(),
         warnings: d.warnings.clone(),
+    }
+}
+
+fn directory_list(out: &ScanOutput) -> Vec<DirectoryJson> {
+    let mut directories: Vec<DirectoryJson> = out
+        .walk
+        .directories
+        .iter()
+        .filter(|(_, d)| !d.acc.is_zero())
+        .map(|(path, d)| DirectoryJson {
+            path: path.to_string_lossy().to_string(),
+            category_id: categories::def_by_index(d.category).id.to_string(),
+            logical_bytes: d.acc.logical,
+            allocated_bytes: d.acc.allocated,
+            file_count: d.acc.files,
+            directory_count: d.acc.dirs,
+        })
+        .collect();
+    directories.sort_by_key(|d| std::cmp::Reverse(d.allocated_bytes));
+    directories
+}
+
+#[derive(Serialize)]
+pub struct TopJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub totals: TotalsJson,
+    pub directories: Vec<DirectoryJson>,
+}
+
+pub fn top(out: &ScanOutput, limit: usize) -> TopJson {
+    let mut directories = directory_list(out);
+    directories.truncate(limit.max(1));
+    TopJson {
+        version: SCHEMA_VERSION,
+        command: "top",
+        timestamp: time::format_local(time::now_unix()),
+        totals: TotalsJson::from(&out.walk.totals),
+        directories,
     }
 }
 

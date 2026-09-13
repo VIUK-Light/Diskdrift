@@ -1,14 +1,16 @@
 //! Command implementations.
 
-use crate::cli::args::{Command, CommonArgs, DiffArgs, ExplainArgs, ScanArgs};
+use crate::cli::args::{Command, CommonArgs, DiffArgs, ExplainArgs, ScanArgs, TopArgs};
 use crate::cli::progress::Progress;
 use crate::cli::render;
+use crate::core::config::Config;
 use crate::core::diff;
 use crate::core::doctor;
 use crate::core::error::{Error, Result};
 use crate::core::explain::{self, ResolvedQuery};
 use crate::core::fs::ProgressCounters;
 use crate::core::json;
+use crate::core::paths;
 use crate::core::scan::{self, ScanConfig, ScanTarget};
 use crate::core::store::Store;
 use crate::scanners;
@@ -23,6 +25,7 @@ pub const EXIT_INTERRUPTED: i32 = 130;
 pub fn run(cmd: Command) -> Result<i32> {
     match cmd {
         Command::Scan(args) => cmd_scan(args),
+        Command::Top(args) => cmd_top(args),
         Command::Snapshot(args) => cmd_snapshot(args),
         Command::Diff(args) => cmd_diff(args),
         Command::Explain(args) => cmd_explain(args),
@@ -62,49 +65,126 @@ fn resolve_data_dir(common: &CommonArgs, home: &Path) -> PathBuf {
     Store::data_dir_for(home)
 }
 
-fn build_targets(home: &Path, roots: &[PathBuf]) -> Vec<ScanTarget> {
-    if roots.is_empty() {
-        scanners::default_targets(home)
-    } else {
-        roots
-            .iter()
-            .map(|r| {
-                let expanded = explain::expand_tilde(&r.to_string_lossy(), home);
-                scanners::generic::target_for(expanded)
-            })
-            .collect()
-    }
+fn load_config(common: &CommonArgs, home: &Path) -> Result<Config> {
+    Config::load(home, common.config.as_deref())
 }
 
-fn perform_scan(args: &ScanArgs, home: &Path, data_dir: &Path) -> scan::ScanOutput {
-    let targets = build_targets(home, &args.roots);
+/// Build the scan target list from a positional path, `--root` values or the
+/// built-in defaults. Explicitly requested paths must exist and be
+/// directories.
+fn resolve_scan_targets(
+    home: &Path,
+    path: Option<&Path>,
+    roots: &[PathBuf],
+) -> Result<Vec<ScanTarget>> {
+    if let Some(p) = path {
+        let expanded = paths::expand_user_path(&p.to_string_lossy(), home);
+        let md = std::fs::metadata(&expanded)
+            .map_err(|e| Error::Message(format!("cannot access {}: {e}", expanded.display())))?;
+        if !md.is_dir() {
+            return Err(Error::Message(format!(
+                "{} is not a directory",
+                expanded.display()
+            )));
+        }
+        return Ok(vec![scanners::generic::target_for(expanded)]);
+    }
+    if roots.is_empty() {
+        return Ok(scanners::default_targets(home));
+    }
+    let mut targets = Vec::with_capacity(roots.len());
+    for r in roots {
+        let expanded = paths::expand_user_path(&r.to_string_lossy(), home);
+        let md = std::fs::metadata(&expanded)
+            .map_err(|e| Error::Message(format!("cannot access {}: {e}", expanded.display())))?;
+        if !md.is_dir() {
+            return Err(Error::Message(format!(
+                "{} is not a directory",
+                expanded.display()
+            )));
+        }
+        targets.push(scanners::generic::target_for(expanded));
+    }
+    Ok(targets)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_with(
+    home: &Path,
+    data_dir: &Path,
+    config: &Config,
+    path: Option<&Path>,
+    roots: &[PathBuf],
+    depth: Option<usize>,
+    threads: Option<usize>,
+    progress_enabled: bool,
+) -> Result<scan::ScanOutput> {
+    let targets = resolve_scan_targets(home, path, roots)?;
+    let custom = path.is_some() || !roots.is_empty();
+    // Config `depth` is the default for explicitly scanned paths;
+    // `--depth` overrides everything.
+    let depth_override = depth.or(if custom {
+        Some(config.depth.unwrap_or(2))
+    } else {
+        None
+    });
+
+    // Never include our own database (or config exclusions) in a scan.
+    let mut exclusions = vec![data_dir.to_path_buf()];
+    exclusions.extend(config.exclude.iter().cloned());
+
     let counters = Arc::new(ProgressCounters::new());
-    let progress_enabled = !args.common.json && !args.common.no_progress;
     let progress = Progress::start(counters.clone(), progress_enabled);
     let out = scan::run(ScanConfig {
         home,
         targets,
-        threads: args.threads.unwrap_or_else(scan::default_threads),
+        threads: threads
+            .or(config.threads)
+            .unwrap_or_else(scan::default_threads),
         progress: Some(&counters),
-        // Never include our own database in a scan/snapshot.
-        exclusions: vec![data_dir.to_path_buf()],
+        exclusions,
+        depth_override,
     });
     drop(progress);
-    out
+    Ok(out)
+}
+
+fn print_scan_result(
+    out: &scan::ScanOutput,
+    home: &Path,
+    common: &CommonArgs,
+    show_directories: bool,
+) -> Result<()> {
+    if common.json {
+        println!("{}", json::to_pretty(&json::scan(out)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_scan(&mut w, out, home, common.verbose, show_directories)?;
+        w.flush()?;
+    }
+    Ok(())
 }
 
 fn cmd_scan(args: ScanArgs) -> Result<i32> {
     let home = resolve_home();
     let data_dir = resolve_data_dir(&args.common, &home);
-    let out = perform_scan(&args, &home, &data_dir);
-    if args.common.json {
-        println!("{}", json::to_pretty(&json::scan(&out)));
-    } else {
-        let stdout = io::stdout();
-        let mut w = stdout.lock();
-        render::render_scan(&mut w, &out, &home, args.common.verbose)?;
-        w.flush()?;
-    }
+    let config = load_config(&args.common, &home)?;
+    let progress_enabled = !args.common.json && !args.common.no_progress;
+    let out = scan_with(
+        &home,
+        &data_dir,
+        &config,
+        args.path.as_deref(),
+        &args.roots,
+        args.depth,
+        args.threads,
+        progress_enabled,
+    )?;
+    // Directory details are shown for explicit paths and depth overrides,
+    // where the user asked for a more detailed structure.
+    let show_directories = args.path.is_some() || args.depth.is_some();
+    print_scan_result(&out, &home, &args.common, show_directories)?;
     Ok(if out.walk.interrupted {
         EXIT_INTERRUPTED
     } else {
@@ -112,10 +192,47 @@ fn cmd_scan(args: ScanArgs) -> Result<i32> {
     })
 }
 
+fn cmd_top(args: TopArgs) -> Result<i32> {
+    let home = resolve_home();
+    let data_dir = resolve_data_dir(&args.common, &home);
+    let config = load_config(&args.common, &home)?;
+    let progress_enabled = !args.common.json && !args.common.no_progress;
+    let out = scan_with(
+        &home,
+        &data_dir,
+        &config,
+        args.path.as_deref(),
+        &args.roots,
+        args.depth,
+        args.threads,
+        progress_enabled,
+    )?;
+    if args.common.json {
+        println!("{}", json::to_pretty(&json::top(&out, args.limit)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_top(&mut w, &out, &home, args.limit)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
 fn cmd_snapshot(args: ScanArgs) -> Result<i32> {
     let home = resolve_home();
     let data_dir = resolve_data_dir(&args.common, &home);
-    let out = perform_scan(&args, &home, &data_dir);
+    let config = load_config(&args.common, &home)?;
+    let progress_enabled = !args.common.json && !args.common.no_progress;
+    let out = scan_with(
+        &home,
+        &data_dir,
+        &config,
+        args.path.as_deref(),
+        &args.roots,
+        args.depth,
+        args.threads,
+        progress_enabled,
+    )?;
     if out.walk.interrupted {
         eprintln!("Interrupted — snapshot was not saved (partial data is never stored).");
         return Ok(EXIT_INTERRUPTED);
@@ -205,8 +322,14 @@ fn cmd_explain(args: ExplainArgs) -> Result<i32> {
     let counters = Arc::new(ProgressCounters::new());
     let progress_enabled = !args.common.json && !args.common.no_progress;
     let progress = Progress::start(counters.clone(), progress_enabled);
-    let threads = args.threads.unwrap_or_else(scan::default_threads);
+    let config = load_config(&args.common, &home)?;
+    let threads = args
+        .threads
+        .or(config.threads)
+        .unwrap_or_else(scan::default_threads);
     let data_dir = resolve_data_dir(&args.common, &home);
+    let mut exclusions = vec![data_dir];
+    exclusions.extend(config.exclude.iter().cloned());
     let output = match query {
         ResolvedQuery::Category(idx) => explain::explain_category(
             idx,
@@ -214,15 +337,11 @@ fn cmd_explain(args: ExplainArgs) -> Result<i32> {
             &all_targets,
             threads,
             Some(&counters),
-            std::slice::from_ref(&data_dir),
+            &exclusions,
         ),
-        ResolvedQuery::Path(path) => explain::explain_path(
-            &path,
-            &home,
-            threads,
-            Some(&counters),
-            std::slice::from_ref(&data_dir),
-        )?,
+        ResolvedQuery::Path(path) => {
+            explain::explain_path(&path, &home, threads, Some(&counters), &exclusions)?
+        }
     };
     drop(progress);
 
@@ -241,7 +360,12 @@ fn cmd_doctor(common: CommonArgs) -> Result<i32> {
     let home = resolve_home();
     let data_dir = resolve_data_dir(&common, &home);
     let targets = scanners::default_targets(&home);
-    let report = doctor::run(&home, &data_dir, &targets)?;
+    // Doctor still works when the config is broken; it reports the problem.
+    let (config, config_error) = match Config::load(&home, common.config.as_deref()) {
+        Ok(config) => (config, None),
+        Err(e) => (Config::disabled(), Some(e.to_string())),
+    };
+    let report = doctor::run(&home, &data_dir, &targets, &config, config_error)?;
     if common.json {
         println!("{}", json::to_pretty(&json::doctor(&report, &home)));
     } else {

@@ -22,6 +22,7 @@ fn scan_home(home: &Path) -> scan::ScanOutput {
         threads: 2,
         progress: None,
         exclusions: Vec::new(),
+        depth_override: None,
     })
 }
 
@@ -169,6 +170,7 @@ fn excluded_paths_are_not_counted_or_reported() {
         threads: 1,
         progress: None,
         exclusions: vec![excluded],
+        depth_override: None,
     });
 
     let rolled = fs::rollup_categories(&out.walk.categories);

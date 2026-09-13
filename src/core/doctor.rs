@@ -1,5 +1,6 @@
 //! `diskdrift doctor` — permissions, database and scan-location diagnostics.
 
+use crate::core::config::Config;
 use crate::core::error::Result;
 use crate::core::scan::ScanTarget;
 use crate::core::snapshot::SnapshotMeta;
@@ -15,6 +16,10 @@ pub struct LocationCheck {
 
 pub struct DoctorReport {
     pub data_dir: PathBuf,
+    pub config_path: PathBuf,
+    pub config_exists: bool,
+    pub config_error: Option<String>,
+    pub excluded: Vec<PathBuf>,
     pub db_path: PathBuf,
     pub db_exists: bool,
     pub db_size_bytes: u64,
@@ -64,7 +69,13 @@ fn with_label(mut c: LocationCheck, label: &'static str) -> LocationCheck {
     c
 }
 
-pub fn run(home: &Path, data_dir: &Path, targets: &[ScanTarget]) -> Result<DoctorReport> {
+pub fn run(
+    home: &Path,
+    data_dir: &Path,
+    targets: &[ScanTarget],
+    config: &Config,
+    config_error: Option<String>,
+) -> Result<DoctorReport> {
     let db_path = Store::default_path(data_dir);
 
     // Data directory / database checks.
@@ -169,6 +180,10 @@ pub fn run(home: &Path, data_dir: &Path, targets: &[ScanTarget]) -> Result<Docto
 
     Ok(DoctorReport {
         data_dir: data_dir.to_path_buf(),
+        config_path: config.path.clone(),
+        config_exists: config.exists,
+        config_error,
+        excluded: config.exclude.clone(),
         db_path,
         db_exists,
         db_size_bytes,
