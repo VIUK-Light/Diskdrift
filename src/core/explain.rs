@@ -9,6 +9,8 @@ use crate::core::snapshot::CatVal;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub use crate::core::paths::{display_path, expand_tilde};
+
 pub enum ResolvedQuery {
     Category(usize),
     Path(PathBuf),
@@ -30,16 +32,6 @@ pub struct ExplainOutput {
     pub total: CatVal,
     pub breakdown: Vec<ExplainRow>,
     pub purpose: Option<String>,
-}
-
-pub fn expand_tilde(token: &str, home: &Path) -> PathBuf {
-    if token == "~" {
-        home.to_path_buf()
-    } else if let Some(rest) = token.strip_prefix("~/") {
-        home.join(rest)
-    } else {
-        PathBuf::from(token)
-    }
 }
 
 pub fn resolve_query(token: &str, home: &Path) -> Result<ResolvedQuery> {
@@ -302,18 +294,6 @@ fn relative_bucket_name(dir: &Path, targets: &[ScanTarget], home: &Path) -> Stri
         }
     }
     display_path(dir, home)
-}
-
-pub fn display_path(path: &Path, home: &Path) -> String {
-    if let Ok(rel) = path.strip_prefix(home) {
-        if rel.as_os_str().is_empty() {
-            "~".to_string()
-        } else {
-            format!("~/{}", rel.to_string_lossy())
-        }
-    } else {
-        path.to_string_lossy().to_string()
-    }
 }
 
 #[cfg(test)]

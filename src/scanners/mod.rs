@@ -16,10 +16,13 @@ pub mod homebrew;
 pub mod huggingface;
 pub mod lmstudio;
 pub mod logs;
+pub mod mlx;
 pub mod npm;
 pub mod ollama;
+pub mod orbstack;
 pub mod pnpm;
 pub mod xcode;
+pub mod yarn;
 
 fn target(
     path: PathBuf,
@@ -42,11 +45,14 @@ pub fn default_targets(home: &Path) -> Vec<ScanTarget> {
     all.extend(xcode::targets(home));
     all.extend(homebrew::targets(home));
     all.extend(docker::targets(home));
+    all.extend(orbstack::targets(home));
     all.extend(ollama::targets(home));
     all.extend(huggingface::targets(home));
     all.extend(lmstudio::targets(home));
     all.extend(npm::targets(home));
     all.extend(pnpm::targets(home));
+    all.extend(yarn::targets(home));
+    all.extend(mlx::targets(home));
     all.extend(caches::targets(home));
     all.extend(app_support::targets(home));
     all.extend(containers::targets(home));

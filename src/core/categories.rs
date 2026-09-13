@@ -89,6 +89,13 @@ pub static CATEGORIES: &[CategoryDef] = &[
         ["docker", "docker desktop"]
     ),
     cat!(
+        "developer.orbstack",
+        "OrbStack",
+        "developer",
+        "OrbStack Linux machines, containers and Docker-compatible data.",
+        ["orbstack", "orb stack"]
+    ),
+    cat!(
         "developer.npm",
         "npm",
         "developer",
@@ -101,6 +108,13 @@ pub static CATEGORIES: &[CategoryDef] = &[
         "developer",
         "pnpm package store and cache.",
         ["pnpm"]
+    ),
+    cat!(
+        "developer.yarn",
+        "Yarn",
+        "developer",
+        "Yarn package cache and global packages.",
+        ["yarn"]
     ),
     cat!(
         "developer.other",
@@ -136,6 +150,13 @@ pub static CATEGORIES: &[CategoryDef] = &[
         "ai",
         "Models and data managed by LM Studio.",
         ["lmstudio", "lm studio"]
+    ),
+    cat!(
+        "ai.mlx",
+        "MLX",
+        "ai",
+        "Local MLX model files and caches.",
+        ["mlx", "apple mlx"]
     ),
     cat!(
         "ai.other",

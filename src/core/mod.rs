@@ -1,5 +1,6 @@
 pub mod categories;
 pub mod classify;
+pub mod config;
 pub mod diff;
 pub mod doctor;
 pub mod error;
@@ -7,6 +8,7 @@ pub mod explain;
 pub mod fs;
 pub mod interrupt;
 pub mod json;
+pub mod paths;
 pub mod scan;
 pub mod size;
 pub mod snapshot;

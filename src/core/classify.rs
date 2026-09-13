@@ -111,10 +111,29 @@ impl Classifier {
         );
         push(".docker", "developer.docker", &mut raw);
 
+        push(
+            "Library/Group Containers/HUAQ24HBR6.dev.orbstack",
+            "developer.orbstack",
+            &mut raw,
+        );
+        push(
+            "Library/Application Support/OrbStack",
+            "developer.orbstack",
+            &mut raw,
+        );
+        push(".orbstack", "developer.orbstack", &mut raw);
+
+        push(".yarn", "developer.yarn", &mut raw);
+        push(".cache/yarn", "developer.yarn", &mut raw);
+        push("Library/Caches/Yarn", "developer.yarn", &mut raw);
+
         push(".npm", "developer.npm", &mut raw);
         push("Library/pnpm", "developer.pnpm", &mut raw);
         push(".pnpm-store", "developer.pnpm", &mut raw);
         push(".local/share/pnpm", "developer.pnpm", &mut raw);
+
+        push("mlx_models", "ai.mlx", &mut raw);
+        push(".cache/mlx", "ai.mlx", &mut raw);
 
         push(".cache", "system.caches", &mut raw);
 
@@ -270,6 +289,15 @@ mod tests {
         );
         assert_eq!(cat("/Users/test/.npm/_cacache"), "developer.npm");
         assert_eq!(cat("/Users/test/Library/pnpm/store"), "developer.pnpm");
+        assert_eq!(cat("/Users/test/.orbstack/data"), "developer.orbstack");
+        assert_eq!(
+            cat("/Users/test/Library/Group Containers/HUAQ24HBR6.dev.orbstack"),
+            "developer.orbstack"
+        );
+        assert_eq!(cat("/Users/test/.yarn/berry/cache"), "developer.yarn");
+        assert_eq!(cat("/Users/test/Library/Caches/Yarn/v6"), "developer.yarn");
+        assert_eq!(cat("/Users/test/mlx_models/qwen"), "ai.mlx");
+        assert_eq!(cat("/Users/test/.cache/mlx/model"), "ai.mlx");
     }
 
     #[test]
