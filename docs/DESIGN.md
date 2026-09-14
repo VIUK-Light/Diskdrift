@@ -310,6 +310,22 @@ Consumers should check `version`.
 
 ---
 
+## 11b. Native frontends (v0.6)
+
+- The core crate builds as `rlib` + `staticlib`; the CLI is a thin binary on
+  top of the same library.
+- `src/ffi.rs` exposes a JSON-over-C-ABI: each `dd_*` function returns the
+  same schema-1 JSON as the CLI, or `{"error":"..."}`. Strings are freed
+  with `dd_free_string`.
+- The SwiftUI app (`gui/`) links `libdiskdrift.a` directly, decodes the JSON
+  with Codable and never spawns the CLI or duplicates scanner logic. It
+  targets macOS 13+; the core keeps supporting macOS 11+.
+- `gui/build.sh` compiles the Swift sources with `swiftc` and assembles
+  `DiskDrift.app` (ad-hoc signed). Release archives are unsigned, matching
+  the source-build-friendly distribution policy.
+- `gui/smoke.sh` compiles a headless Swift program against the C ABI and
+  verifies version, disk usage, scan, snapshot, history and error paths.
+
 ## 12. Future work (explicitly not v0.1)
 
 - FSEvents-based change timeline: "between 13:20 and 13:30, CoreSimulator grew

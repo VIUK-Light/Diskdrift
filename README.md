@@ -48,6 +48,8 @@ It is not a cleaner.
 - **`snapshots`** — lists stored snapshots (IDs, timestamps, tracked size).
 - **`watch` / `events` / `what-happened`** — record filesystem changes locally
   and explain what happened in a time window.
+- **macOS GUI** — a native SwiftUI app (Dashboard, Storage, History, What
+  Happened) that links the same Rust core directly.
 
 Every command supports `--json` (stable schema, `version: 1`) for scripting and
 future GUIs.
@@ -98,7 +100,45 @@ You can verify the absence of network code yourself:
 
 ---
 
+## Interfaces
+
+DiskDrift core is a Rust library. The CLI and the SwiftUI GUI both use it
+directly:
+
+```text
+                 ┌──────────────────┐
+                 │   DiskDrift Core │  Rust: scan / snapshot / history / events
+                 └────────┬─────────┘
+                          │ C ABI (JSON, schema 1)
+              ┌───────────┴───────────┐
+              │                       │
+         diskdrift CLI          DiskDrift.app (SwiftUI)
+```
+
+The GUI links `libdiskdrift.a` (`gui/include/CDiskDrift.h`) — it never spawns
+the CLI and never reimplements storage logic.
+
 ## Installation
+
+### macOS GUI
+
+```bash
+./gui/build.sh
+open dist/DiskDrift.app
+```
+
+Requires the Xcode command line tools (Swift) and Rust. The app is built
+locally, ad-hoc signed and targets macOS 13 or later (the CLI supports
+macOS 11+). Unsigned `.app.zip` archives are also attached to
+[Releases](https://github.com/VIUK-Light/Diskdrift/releases); unzip, move to
+`/Applications` and right-click → Open the first time.
+
+The GUI has four screens:
+
+- **Dashboard** — volume usage, last 24 hours growth, "Scan now" / "Take snapshot"
+- **Storage** — category bars and the largest tracked directories
+- **History** — day-over-day changes per category (needs snapshots)
+- **What Happened** — incidents from the watch event log
 
 ### Prebuilt binaries
 
@@ -605,7 +645,9 @@ cargo fmt
 
 Tests never depend on the real machine's data; they build temporary trees and
 exercise the walker, classification, SQLite store, diff engine and the CLI
-binary end to end.
+binary end to end. `gui/smoke.sh` additionally builds a small Swift program
+against the C ABI and verifies scan/snapshot/history/error handling without a
+GUI.
 
 Project layout:
 
@@ -613,6 +655,8 @@ Project layout:
 src/core/       filesystem walker, classification, snapshot store, diff, explain
 src/scanners/   per-tool location modules (xcode, homebrew, docker, ollama, …)
 src/cli/        argument parsing, commands, rendering, progress
+src/ffi.rs      C ABI for native frontends (JSON, schema 1)
+gui/            SwiftUI app (CDiskDrift.h, Sources/, build.sh, smoke.sh)
 tests/          integration tests
 docs/DESIGN.md  architecture and design decisions
 ```

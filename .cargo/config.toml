@@ -1,0 +1,4 @@
+# Build macOS binaries with a consistent deployment target so the bundled
+# SQLite objects match the Rust objects (macOS 11+, matching rustc's default).
+[env]
+MACOSX_DEPLOYMENT_TARGET = "11.0"

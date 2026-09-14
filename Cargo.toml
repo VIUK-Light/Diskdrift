@@ -8,6 +8,10 @@ license = "MIT"
 repository = "https://github.com/VIUK-Light/Diskdrift"
 readme = "README.md"
 
+[lib]
+name = "diskdrift"
+crate-type = ["rlib", "staticlib"]
+
 [dependencies]
 libc = "0.2.189"
 notify = "8.2.0"

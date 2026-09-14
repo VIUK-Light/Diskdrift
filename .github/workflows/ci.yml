@@ -46,3 +46,9 @@ jobs:
 
       - name: Release build
         run: cargo build --release --locked
+
+      - name: Core smoke test (C ABI + Swift)
+        run: ./gui/smoke.sh
+
+      - name: Build GUI app
+        run: ./gui/build.sh

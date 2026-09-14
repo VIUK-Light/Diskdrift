@@ -4,5 +4,6 @@
 //! It never deletes files, never sends data anywhere.
 
 pub mod cli;
+pub mod ffi;
 pub mod core;
 pub mod scanners;

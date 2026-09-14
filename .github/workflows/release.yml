@@ -19,8 +19,10 @@ jobs:
         include:
           - runner: macos-latest
             target: aarch64-apple-darwin
+            arch: arm64
           - runner: macos-15-intel
             target: x86_64-apple-darwin
+            arch: x86_64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -45,23 +47,36 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      - name: Package archive and checksum
+      - name: Build GUI app
+        run: |
+          ./gui/build.sh \
+            --arch ${{ matrix.arch }} \
+            --lib "target/${{ matrix.target }}/release" \
+            --out dist/DiskDrift.app \
+            --version "${GITHUB_REF_NAME#v}"
+
+      - name: Package archives and checksums
         run: |
           tag="${GITHUB_REF_NAME}"
           name="diskdrift-${tag}-${{ matrix.target }}"
+          gui="DiskDrift-${tag}-${{ matrix.target }}"
           work="dist/${name}"
           mkdir -p "$work"
           cp "target/${{ matrix.target }}/release/diskdrift" "$work/"
           cp README.md LICENSE "$work/"
           tar -C dist -czf "dist/${name}.tar.gz" "$name"
           (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          (cd dist && ditto -c -k --keepParent DiskDrift.app "${gui}.app.zip")
+          (cd dist && shasum -a 256 "${gui}.app.zip" > "${gui}.app.zip.sha256")
           ls -l dist
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
-          path: dist/*.tar.gz*
+          path: |
+            dist/*.tar.gz*
+            dist/*.app.zip*
           if-no-files-found: error
 
   release:
@@ -88,17 +103,17 @@ jobs:
             --title "DiskDrift $tag" \
             --notes-file - \
             --verify-tag \
-            dist/*.tar.gz dist/*.tar.gz.sha256 <<'NOTES'
+            dist/*.tar.gz dist/*.tar.gz.sha256 dist/*.app.zip dist/*.app.zip.sha256 <<'NOTES'
           DiskDrift is a read-only macOS CLI that helps you find out where your
           storage went: `scan`, `snapshot`, `diff`, `explain`, `doctor`, all with
           `--json` output. It never deletes files and never uses the network.
 
           ### Downloads
 
-          | Mac | Archive |
-          | --- | --- |
-          | Apple Silicon | `diskdrift-*-aarch64-apple-darwin.tar.gz` |
-          | Intel | `diskdrift-*-x86_64-apple-darwin.tar.gz` |
+          | Mac | CLI | GUI |
+          | --- | --- | --- |
+          | Apple Silicon | `diskdrift-*-aarch64-apple-darwin.tar.gz` | `DiskDrift-*-aarch64-apple-darwin.app.zip` |
+          | Intel | `diskdrift-*-x86_64-apple-darwin.tar.gz` | `DiskDrift-*-x86_64-apple-darwin.app.zip` |
 
           ### Install
 
@@ -109,9 +124,11 @@ jobs:
           diskdrift scan
           ```
 
-          The binaries are not code-signed. If Gatekeeper blocks the download,
-          build from source (`cargo build --release`) or see the README for the
-          quarantine workaround.
+          The GUI app is not notarized either: unzip it, move it to
+          /Applications and right-click → Open the first time (or build from
+          source). The binaries are not code-signed. If Gatekeeper blocks the
+          download, build from source (`cargo build --release`) or see the
+          README for the quarantine workaround.
 
           Snapshots store metadata only (paths, sizes, counts). File contents are
           never stored or transmitted.
