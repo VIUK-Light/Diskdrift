@@ -601,3 +601,113 @@ fn events_json_reads_recorded_events() {
     let none = diskdrift(&home, &data, &["events", "--since", "1s", "--json"]);
     assert_eq!(json(&none)["events"].as_array().unwrap().len(), 0);
 }
+
+#[test]
+fn what_happened_groups_events_into_incidents() {
+    let tmp = TempDir::new("cli-what");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    let now = time::now_unix();
+    {
+        let mut store = Store::open(&Store::default_path(&data)).unwrap();
+        store
+            .insert_events(&[
+                EventDraft {
+                    timestamp_unix: now - 3_600,
+                    kind: "grow",
+                    path: home.join("Library/Developer/CoreSimulator"),
+                    category_id: "developer.xcode.core_simulator".to_string(),
+                    delta_bytes: 1_500_000,
+                    allocated_bytes: 2_000_000,
+                    file_count: 10,
+                    directory_count: 2,
+                },
+                EventDraft {
+                    timestamp_unix: now - 1_800,
+                    kind: "grow",
+                    path: home.join("Library/Developer/CoreSimulator"),
+                    category_id: "developer.xcode.core_simulator".to_string(),
+                    delta_bytes: 500_000,
+                    allocated_bytes: 2_500_000,
+                    file_count: 12,
+                    directory_count: 3,
+                },
+                EventDraft {
+                    timestamp_unix: now - 900,
+                    kind: "shrink",
+                    path: home.join("Library/Caches/a"),
+                    category_id: "system.caches".to_string(),
+                    delta_bytes: -200_000,
+                    allocated_bytes: 100_000,
+                    file_count: 1,
+                    directory_count: 0,
+                },
+            ])
+            .unwrap();
+    }
+
+    let out = diskdrift(&home, &data, &["what-happened", "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["command"], "what-happened");
+    assert_eq!(v["total"]["delta_bytes"].as_i64().unwrap(), 1_800_000);
+    assert_eq!(v["total"]["event_count"], 3);
+    let incidents = v["incidents"].as_array().unwrap();
+    assert_eq!(incidents.len(), 2);
+    assert_eq!(incidents[0]["label"], "Xcode / CoreSimulator");
+    assert_eq!(incidents[0]["delta_bytes"].as_i64().unwrap(), 2_000_000);
+    assert_eq!(incidents[0]["event_count"], 2);
+    assert_eq!(incidents[1]["category_id"], "system.caches");
+    assert_eq!(incidents[1]["delta_bytes"].as_i64().unwrap(), -200_000);
+
+    let human = diskdrift(&home, &data, &["what-happened"]);
+    assert!(human.status.success());
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        text.contains("What happened in the last 24 hours?"),
+        "{text}"
+    );
+    assert!(text.contains("Disk usage increased by 1.8 MB"), "{text}");
+    assert!(text.contains("1. Xcode / CoreSimulator"), "{text}");
+    assert!(text.contains("2. Caches"), "{text}");
+
+    // --since 30m drops the oldest event.
+    let recent = diskdrift(&home, &data, &["what-happened", "--since", "30m", "--json"]);
+    assert_eq!(json(&recent)["total"]["event_count"], 2);
+
+    // --limit caps the incident list.
+    let limited = diskdrift(&home, &data, &["what-happened", "--limit", "1", "--json"]);
+    assert_eq!(json(&limited)["incidents"].as_array().unwrap().len(), 1);
+
+    // --from/--to within the same local day covers the events.
+    let (_, _, _, hour_from, minute_from, _) = time::local_parts(now - 7_200);
+    let (_, _, _, hour_to, minute_to, _) = time::local_parts(now + 60);
+    let today = time::format_local(now)[..10].to_string();
+    let same_day = time::format_local(now - 7_200)[..10] == today;
+    if same_day {
+        let from = format!("{hour_from:02}:{minute_from:02}");
+        let to = format!("{hour_to:02}:{minute_to:02}");
+        let window = diskdrift(
+            &home,
+            &data,
+            &["what-happened", "--from", &from, "--to", &to, "--json"],
+        );
+        assert!(
+            window.status.success(),
+            "{}",
+            String::from_utf8_lossy(&window.stderr)
+        );
+        assert_eq!(json(&window)["total"]["event_count"], 3);
+    }
+
+    // Empty period is explained instead of failing.
+    let empty = diskdrift(&home, &data, &["what-happened", "--since", "1s", "--json"]);
+    assert!(empty.status.success());
+    assert_eq!(json(&empty)["total"]["event_count"], 0);
+    let human = diskdrift(&home, &data, &["what-happened", "--since", "1s"]);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("No watch events"));
+}

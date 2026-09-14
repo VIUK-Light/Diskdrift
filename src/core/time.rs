@@ -125,6 +125,83 @@ pub fn parse_datetime_prefix(s: &str) -> Option<i64> {
         .map(|days| days * 86_400 + (h as i64) * 3_600 + (mi as i64) * 60 + sec as i64)
 }
 
+/// Local calendar fields (year, month, day, hour, minute, second).
+#[cfg(target_os = "macos")]
+pub fn local_parts(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
+    unsafe {
+        let t = secs as libc::time_t;
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&t, &mut tm).is_null() {
+            return split_secs(secs);
+        }
+        (
+            tm.tm_year as i64 + 1900,
+            tm.tm_mon as u32 + 1,
+            tm.tm_mday as u32,
+            tm.tm_hour as u32,
+            tm.tm_min as u32,
+            tm.tm_sec as u32,
+        )
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn local_parts(secs: i64) -> (i64, u32, u32, u32, u32, u32) {
+    split_secs(secs)
+}
+
+/// Convert local calendar fields to unix time (DST-aware on macOS).
+#[cfg(target_os = "macos")]
+pub fn local_datetime_unix(
+    year: i64,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+) -> Option<i64> {
+    unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        tm.tm_year = (year - 1900) as libc::c_int;
+        tm.tm_mon = (month as i32 - 1) as libc::c_int;
+        tm.tm_mday = day as libc::c_int;
+        tm.tm_hour = hour as libc::c_int;
+        tm.tm_min = minute as libc::c_int;
+        tm.tm_sec = second as libc::c_int;
+        tm.tm_isdst = -1;
+        let t = libc::mktime(&mut tm);
+        if t == -1 { None } else { Some(t as i64) }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn local_datetime_unix(
+    year: i64,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+) -> Option<i64> {
+    days_from_civil(year, month, day)
+        .map(|days| days * 86_400 + hour as i64 * 3_600 + minute as i64 * 60 + second as i64)
+}
+
+/// Parse `HH:MM` or `HH:MM:SS`.
+pub fn parse_hhmm(input: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = input.trim().split(':');
+    let hour: u32 = parts.next()?.parse().ok()?;
+    let minute: u32 = parts.next()?.parse().ok()?;
+    let second: u32 = match parts.next() {
+        Some(value) => value.parse().ok()?,
+        None => 0,
+    };
+    if parts.next().is_some() || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    Some((hour, minute, second))
+}
+
 /// Parse a duration such as `30s`, `45m`, `24h`, `7d` or `2w`.
 pub fn parse_duration(input: &str) -> Option<i64> {
     let s = input.trim();
@@ -209,6 +286,23 @@ mod tests {
         assert_eq!(parse_duration("7"), None);
         assert_eq!(parse_duration("7x"), None);
         assert_eq!(parse_duration("0d"), None);
+    }
+
+    #[test]
+    fn hhmm_parsing() {
+        assert_eq!(parse_hhmm("14:00"), Some((14, 0, 0)));
+        assert_eq!(parse_hhmm("09:30:15"), Some((9, 30, 15)));
+        assert_eq!(parse_hhmm("24:00"), None);
+        assert_eq!(parse_hhmm("14-00"), None);
+        assert_eq!(parse_hhmm(""), None);
+    }
+
+    #[test]
+    fn local_datetime_round_trip() {
+        let now = 1_789_285_221; // 2026-09-13T07:40:21Z
+        let (y, mo, d, h, mi, s) = local_parts(now);
+        let again = local_datetime_unix(y, mo, d, h, mi, s).unwrap();
+        assert_eq!(again, now);
     }
 
     #[test]

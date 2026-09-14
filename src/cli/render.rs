@@ -9,6 +9,7 @@ use crate::core::history::HistoryDay;
 use crate::core::scan::ScanOutput;
 use crate::core::size;
 use crate::core::snapshot::{CatVal, EventRow, SnapshotMeta};
+use crate::core::what_happened::{Report, Window};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -406,6 +407,72 @@ pub fn render_events<W: Write>(w: &mut W, events: &[EventRow], home: &Path) -> i
             label,
             size::format_delta(event.delta_bytes)
         )?;
+    }
+    Ok(())
+}
+
+fn incident_span(first: i64, last: i64) -> String {
+    let first_local = crate::core::time::format_local(first);
+    let last_local = crate::core::time::format_local(last);
+    let first_date = first_local.get(0..10).unwrap_or("");
+    let last_date = last_local.get(0..10).unwrap_or("");
+    let first_time = first_local.get(11..16).unwrap_or("--:--");
+    let last_time = last_local.get(11..16).unwrap_or("--:--");
+    if first == last {
+        return first_time.to_string();
+    }
+    if first_date == last_date {
+        format!("{first_time}–{last_time}")
+    } else {
+        format!(
+            "{} {first_time} – {} {last_time}",
+            first_local.get(5..10).unwrap_or(first_date),
+            last_local.get(5..10).unwrap_or(last_date)
+        )
+    }
+}
+
+pub fn render_what_happened<W: Write>(
+    w: &mut W,
+    report: &Report,
+    window: &Window,
+) -> io::Result<()> {
+    writeln!(w, "What happened in {}?", window.label)?;
+    writeln!(w)?;
+    if report.event_count == 0 {
+        writeln!(w, "No watch events were recorded in this period.")?;
+        writeln!(w, "Run `diskdrift watch` to record changes.")?;
+        return Ok(());
+    }
+
+    let direction = if report.total_delta >= 0 {
+        "increased"
+    } else {
+        "decreased"
+    };
+    writeln!(
+        w,
+        "Disk usage {direction} by {} ({} events).",
+        size::format_bytes(report.total_delta.unsigned_abs()),
+        size::format_count(report.event_count as u64)
+    )?;
+    writeln!(w)?;
+
+    for (i, incident) in report.incidents.iter().enumerate() {
+        let label = truncate(&incident.label, 44);
+        writeln!(
+            w,
+            "{}. {:<46}{:>12}",
+            i + 1,
+            label,
+            size::format_delta(incident.delta_bytes)
+        )?;
+        writeln!(
+            w,
+            "   {}",
+            incident_span(incident.first_unix, incident.last_unix)
+        )?;
+        writeln!(w)?;
     }
     Ok(())
 }

@@ -46,6 +46,8 @@ It is not a cleaner.
 - **`doctor`** — shows database health, scan locations, skipped/protected
   locations and whether Full Disk Access would improve coverage.
 - **`snapshots`** — lists stored snapshots (IDs, timestamps, tracked size).
+- **`watch` / `events` / `what-happened`** — record filesystem changes locally
+  and explain what happened in a time window.
 
 Every command supports `--json` (stable schema, `version: 1`) for scripting and
 future GUIs.
@@ -162,6 +164,8 @@ diskdrift watch [--root <path>]... [--debounce <duration>] [--min-change <size>]
                 [--baseline-depth <n>] [--rebaseline] [--run-for <duration>]
                 [--threads <n>] [--json]
 diskdrift events [--since <duration>] [--limit <n>] [--json]
+diskdrift what-happened [--since <duration>] [--from <HH:MM>] [--to <HH:MM>]
+                        [--limit <n>] [--json]
 diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
 diskdrift doctor [--json]
 diskdrift snapshots [--json]
@@ -368,6 +372,42 @@ Storage events
 
 Events are stored as metadata only (time, path, category, byte delta) in the
 same local SQLite database. `events` reads them; it never touches files.
+
+### what-happened
+
+```bash
+diskdrift what-happened
+diskdrift what-happened --since 1h
+diskdrift what-happened --from 14:00 --to 16:00
+```
+
+```text
+What happened in the last 24 hours?
+
+Disk usage increased by 23.7 GB (412 events).
+
+1. Xcode / CoreSimulator                    +14.8 GB
+   14:21–14:39
+
+2. Ollama                                    +6.1 GB
+   18:04–18:18
+
+3. Caches                                    +2.3 GB
+   09:12–22:40
+```
+
+`what-happened` aggregates the raw `watch` event log into incidents:
+
+- Developer / AI data is reported at its most specific category
+  (`Xcode / CoreSimulator`, `Ollama`);
+- other data is grouped by category (`Caches`, `Application Support`) or by
+  directory when the category is a fallback ("Other");
+- each incident shows net change, direction and the time span of its events;
+- the headline total is the sum of recorded event deltas — exactly what
+  `watch` observed. Use `diff` / `history` for snapshot-based totals.
+
+`--since` and `--from`/`--to` are mutually exclusive. `--from`/`--to` accept
+local `HH:MM` (or `HH:MM:SS`) and handle windows that cross midnight.
 
 ### explain
 

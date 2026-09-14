@@ -66,6 +66,15 @@ pub struct EventsArgs {
 }
 
 #[derive(Debug, Clone)]
+pub struct WhatHappenedArgs {
+    pub common: CommonArgs,
+    pub since: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone)]
 pub struct SnapshotShowArgs {
     pub common: CommonArgs,
     pub id: String,
@@ -94,6 +103,7 @@ pub enum Command {
     History(HistoryArgs),
     Watch(WatchArgs),
     Events(EventsArgs),
+    WhatHappened(WhatHappenedArgs),
     SnapshotShow(SnapshotShowArgs),
     SnapshotDelete(SnapshotDeleteArgs),
     Explain(ExplainArgs),
@@ -121,6 +131,7 @@ pub fn parse(argv: &[String]) -> Result<Command, String> {
         "history" => parse_history(rest),
         "watch" => parse_watch(rest),
         "events" => parse_events(rest),
+        "what-happened" => parse_what_happened(rest),
         "explain" => parse_explain(rest),
         "doctor" => parse_doctor(rest),
         "snapshots" | "list" => parse_snapshots(rest),
@@ -487,6 +498,60 @@ fn parse_events(rest: &[String]) -> Result<Command, String> {
     }))
 }
 
+fn parse_what_happened(rest: &[String]) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    let mut since = None;
+    let mut from = None;
+    let mut to = None;
+    let mut limit = 10usize;
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "--since" => {
+                let v = args.value("--since", inline)?;
+                if crate::core::time::parse_duration(&v).is_none() {
+                    return Err(format!(
+                        "--since expects a duration like 1h or 24h, got '{v}'"
+                    ));
+                }
+                since = Some(v);
+            }
+            "--from" => {
+                let v = args.value("--from", inline)?;
+                if crate::core::time::parse_hhmm(&v).is_none() {
+                    return Err(format!("--from expects a time like 14:00, got '{v}'"));
+                }
+                from = Some(v);
+            }
+            "--to" => {
+                let v = args.value("--to", inline)?;
+                if crate::core::time::parse_hhmm(&v).is_none() {
+                    return Err(format!("--to expects a time like 16:00, got '{v}'"));
+                }
+                to = Some(v);
+            }
+            "--limit" => {
+                limit = parse_count(&mut args, "--limit", inline, 1, 1000)?;
+            }
+            "-h" | "--help" => return Ok(Command::Help(Some("what-happened".into()))),
+            other => return Err(format!("unknown option '{other}'")),
+        }
+    }
+    if since.is_some() && (from.is_some() || to.is_some()) {
+        return Err("--since cannot be combined with --from/--to".into());
+    }
+    Ok(Command::WhatHappened(WhatHappenedArgs {
+        common,
+        since,
+        from,
+        to,
+        limit,
+    }))
+}
+
 fn parse_snapshot(rest: &[String]) -> Result<Command, String> {
     let sub = rest.first().map(|s| s.as_str());
     match sub {
@@ -646,6 +711,8 @@ Usage:
                   [--min-change <size>] [--baseline-depth <n>] [--rebaseline]
                   [--run-for <duration>] [--threads <n>] [--json]
   diskdrift events [--since <duration>] [--limit <n>] [--json]
+  diskdrift what-happened [--since <duration>] [--from <HH:MM>] [--to <HH:MM>]
+                          [--limit <n>] [--json]
   diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
   diskdrift doctor [--json]
   diskdrift snapshots [--json]
@@ -809,6 +876,45 @@ mod tests {
             _ => panic!("wrong command"),
         }
         assert!(parse(&args(&["events", "--since", "yesterday"])).is_err());
+    }
+
+    #[test]
+    fn parses_what_happened() {
+        let cmd = parse(&args(&["what-happened", "--since", "24h", "--limit", "5"])).unwrap();
+        match cmd {
+            Command::WhatHappened(a) => {
+                assert_eq!(a.since.as_deref(), Some("24h"));
+                assert_eq!(a.limit, 5);
+            }
+            _ => panic!("wrong command"),
+        }
+        let cmd = parse(&args(&[
+            "what-happened",
+            "--from",
+            "14:00",
+            "--to",
+            "16:00",
+        ]))
+        .unwrap();
+        match cmd {
+            Command::WhatHappened(a) => {
+                assert_eq!(a.from.as_deref(), Some("14:00"));
+                assert_eq!(a.to.as_deref(), Some("16:00"));
+            }
+            _ => panic!("wrong command"),
+        }
+        assert!(
+            parse(&args(&[
+                "what-happened",
+                "--since",
+                "1h",
+                "--from",
+                "14:00"
+            ]))
+            .is_err()
+        );
+        assert!(parse(&args(&["what-happened", "--from", "25:00"])).is_err());
+        assert!(parse(&args(&["what-happened", "--since", "yesterday"])).is_err());
     }
 
     #[test]

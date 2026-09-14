@@ -547,6 +547,24 @@ impl Store {
         Ok(out)
     }
 
+    /// Events in `[from, to)`, oldest first.
+    pub fn events_between(&self, from: i64, to: i64, limit: usize) -> Result<Vec<EventRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, timestamp_unix, timestamp_local, kind, path, category_id,
+                    delta_bytes, allocated_bytes, file_count, directory_count
+             FROM events
+             WHERE timestamp_unix >= ?1 AND timestamp_unix < ?2
+             ORDER BY timestamp_unix ASC, id ASC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![from, to, limit as i64], event_from_row)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     pub fn load_watch_dirs(&self) -> Result<Vec<(PathBuf, String, u64)>> {
         let mut stmt = self
             .conn
@@ -611,6 +629,21 @@ impl Store {
     pub fn db_size_bytes(&self) -> u64 {
         std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0)
     }
+}
+
+fn event_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
+    Ok(EventRow {
+        id: r.get(0)?,
+        timestamp_unix: r.get(1)?,
+        timestamp_local: r.get(2)?,
+        kind: r.get(3)?,
+        path: PathBuf::from(r.get::<_, String>(4)?),
+        category_id: r.get(5)?,
+        delta_bytes: r.get(6)?,
+        allocated_bytes: r.get::<_, i64>(7)? as u64,
+        file_count: r.get::<_, i64>(8)? as u64,
+        directory_count: r.get::<_, i64>(9)? as u64,
+    })
 }
 
 fn row_to_meta(r: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotMeta> {

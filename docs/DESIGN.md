@@ -246,6 +246,21 @@ FSEvents -> dirty path queue -> debounce (default 2s)
 - The pipeline (`process_batch`, `collapse_dirty`, `build_baseline`) is
   independent of FSEvents and unit-tested with temporary directories.
 
+## 8c. What Happened (v0.5)
+
+`what-happened` reads the `events` table only — it never scans.
+
+- Events are grouped into incidents. Developer/AI events keep their most
+  specific category (`Xcode / CoreSimulator`); other named categories merge
+  across paths (`Caches`); fallback `*.other` categories group by directory.
+- Each incident carries net/grow/shrink bytes, event count and first/last
+  event timestamps; incidents are ranked by absolute net change and capped by
+  `--limit`.
+- The headline total is the sum of event deltas, so it states exactly what
+  was recorded. Snapshot-based totals remain in `diff` and `history`.
+- Windows: `--since` (duration) or local `--from HH:MM --to HH:MM`, resolved
+  by `resolve_window` with midnight crossing handled.
+
 ## 9. JSON schema (version 1)
 
 All outputs share `version`, `command` and `timestamp`. Sizes are integers

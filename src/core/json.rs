@@ -12,6 +12,7 @@ use crate::core::history::HistoryDay;
 use crate::core::scan::ScanOutput;
 use crate::core::snapshot::{CatVal, EventDraft, EventRow, SnapshotMeta};
 use crate::core::time;
+use crate::core::what_happened::{Report, Window};
 use serde::Serialize;
 use std::path::Path;
 
@@ -704,6 +705,75 @@ pub fn watch_event(event: &EventDraft, home: &Path) -> WatchEventJson {
             file_count: event.file_count,
             directory_count: event.directory_count,
         },
+    }
+}
+
+#[derive(Serialize)]
+pub struct IncidentJson {
+    pub label: String,
+    pub category_id: String,
+    pub path: Option<String>,
+    pub delta_bytes: i64,
+    pub grow_bytes: u64,
+    pub shrink_bytes: u64,
+    pub first_event: String,
+    pub last_event: String,
+    pub event_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct WhatHappenedTotalJson {
+    pub delta_bytes: i64,
+    pub grow_bytes: u64,
+    pub shrink_bytes: u64,
+    pub event_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct WhatHappenedJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub window: String,
+    pub from: String,
+    pub to: String,
+    pub from_unix: i64,
+    pub to_unix: i64,
+    pub total: WhatHappenedTotalJson,
+    pub incidents: Vec<IncidentJson>,
+}
+
+pub fn what_happened(report: &Report, window: &Window, home: &Path) -> WhatHappenedJson {
+    WhatHappenedJson {
+        version: SCHEMA_VERSION,
+        command: "what-happened",
+        timestamp: time::format_local(time::now_unix()),
+        window: window.label.clone(),
+        from: time::format_local(window.from_unix),
+        to: time::format_local(window.to_unix),
+        from_unix: window.from_unix,
+        to_unix: window.to_unix,
+        total: WhatHappenedTotalJson {
+            delta_bytes: report.total_delta,
+            grow_bytes: report.total_grow,
+            shrink_bytes: report.total_shrink,
+            event_count: report.event_count,
+        },
+        incidents: report
+            .incidents
+            .iter()
+            .map(|incident| IncidentJson {
+                label: incident.label.clone(),
+                category_id: incident.category_id.clone(),
+                path: incident.path.as_ref().map(|p| display_path(p, home)),
+                delta_bytes: incident.delta_bytes,
+                grow_bytes: incident.grow_bytes,
+                shrink_bytes: incident.shrink_bytes,
+                first_event: time::format_local(incident.first_unix),
+                last_event: time::format_local(incident.last_unix),
+                event_count: incident.event_count,
+            })
+            .collect(),
     }
 }
 

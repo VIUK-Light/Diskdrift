@@ -230,6 +230,15 @@ fn events_and_watch_dirs_round_trip() {
     assert_eq!(limited.len(), 1);
     assert_eq!(limited[0].timestamp_unix, 2_000);
 
+    // events_between filters by time range, oldest first.
+    let between = store.events_between(1_500, 3_000, 10).unwrap();
+    assert_eq!(between.len(), 1);
+    assert_eq!(between[0].timestamp_unix, 2_000);
+    let all_between = store.events_between(0, 10_000, 1).unwrap();
+    assert_eq!(all_between.len(), 1);
+    assert_eq!(all_between[0].timestamp_unix, 1_000);
+    assert!(store.events_between(5_000, 6_000, 10).unwrap().is_empty());
+
     // watch_dirs upsert and delete
     let row = (tmp.join("dir"), "system.caches".to_string(), 111u64);
     store.upsert_watch_dirs(std::slice::from_ref(&row)).unwrap();

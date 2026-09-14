@@ -2,7 +2,7 @@
 
 use crate::cli::args::{
     Command, CommonArgs, DiffArgs, EventsArgs, ExplainArgs, HistoryArgs, ScanArgs,
-    SnapshotDeleteArgs, SnapshotShowArgs, TopArgs, WatchArgs,
+    SnapshotDeleteArgs, SnapshotShowArgs, TopArgs, WatchArgs, WhatHappenedArgs,
 };
 use crate::cli::progress::Progress;
 use crate::cli::render;
@@ -21,6 +21,7 @@ use crate::core::size;
 use crate::core::store::Store;
 use crate::core::time;
 use crate::core::watch::{self, WatchEntry, WatchState};
+use crate::core::what_happened;
 use crate::scanners;
 use notify::{RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -43,6 +44,7 @@ pub fn run(cmd: Command) -> Result<i32> {
         Command::History(args) => cmd_history(args),
         Command::Watch(args) => cmd_watch(args),
         Command::Events(args) => cmd_events(args),
+        Command::WhatHappened(args) => cmd_what_happened(args),
         Command::SnapshotShow(args) => cmd_snapshot_show(args),
         Command::SnapshotDelete(args) => cmd_snapshot_delete(args),
         Command::Explain(args) => cmd_explain(args),
@@ -644,6 +646,40 @@ fn cmd_events(args: EventsArgs) -> Result<i32> {
         let stdout = io::stdout();
         let mut w = stdout.lock();
         render::render_events(&mut w, &events, &home)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
+fn cmd_what_happened(args: WhatHappenedArgs) -> Result<i32> {
+    let home = resolve_home();
+    let data_dir = resolve_data_dir(&args.common, &home);
+    let db_path = Store::default_path(&data_dir);
+    if !db_path.exists() {
+        return Err(Error::Message(
+            "no event database found. Run `diskdrift watch` first.".into(),
+        ));
+    }
+    let store = Store::open(&db_path)?;
+    let window = what_happened::resolve_window(
+        args.since.as_deref(),
+        args.from.as_deref(),
+        args.to.as_deref(),
+        time::now_unix(),
+    )?;
+    let events = store.events_between(window.from_unix, window.to_unix, 1_000_000)?;
+    let report =
+        what_happened::build_report(&events, window.from_unix, window.to_unix, &home, args.limit);
+
+    if args.common.json {
+        println!(
+            "{}",
+            json::to_pretty(&json::what_happened(&report, &window, &home))
+        );
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_what_happened(&mut w, &report, &window)?;
         w.flush()?;
     }
     Ok(EXIT_OK)
