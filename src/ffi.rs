@@ -21,7 +21,7 @@ use crate::core::what_happened;
 use crate::scanners;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{CStr, CString, c_char};
 use std::path::{Path, PathBuf};
 
 fn cstr(ptr: *const c_char, what: &str) -> Result<Option<String>> {
@@ -379,13 +379,8 @@ fn what_happened_impl(
     )?;
     let events = store.events_between(window.from_unix, window.to_unix, 1_000_000)?;
     let limit = if limit > 0 { limit as usize } else { 10 };
-    let report = what_happened::build_report(
-        &events,
-        window.from_unix,
-        window.to_unix,
-        &home,
-        limit,
-    );
+    let report =
+        what_happened::build_report(&events, window.from_unix, window.to_unix, &home, limit);
     Ok(json::what_happened(&report, &window, &home))
 }
 
@@ -395,10 +390,7 @@ mod tests {
 
     fn take(ptr: *mut c_char) -> String {
         assert!(!ptr.is_null(), "FFI returned a null pointer");
-        let value = unsafe { CStr::from_ptr(ptr) }
-            .to_str()
-            .unwrap()
-            .to_string();
+        let value = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
         unsafe { dd_free_string(ptr) };
         value
     }
@@ -429,13 +421,7 @@ mod tests {
         // Scan only the temporary directory, never the real machine's
         // default locations.
         let path = CString::new(dir.to_string_lossy().as_bytes()).unwrap();
-        let value = take(dd_scan(
-            home.as_ptr(),
-            data.as_ptr(),
-            path.as_ptr(),
-            2,
-            2,
-        ));
+        let value = take(dd_scan(home.as_ptr(), data.as_ptr(), path.as_ptr(), 2, 2));
         let parsed: serde_json::Value = serde_json::from_str(&value).unwrap();
         assert_eq!(parsed["command"], "scan");
         assert_eq!(parsed["totals"]["logical_bytes"].as_u64().unwrap(), 4_000);
@@ -454,6 +440,11 @@ mod tests {
             0,
         ));
         let parsed: serde_json::Value = serde_json::from_str(&value).unwrap();
-        assert!(parsed["error"].as_str().unwrap().contains("not a directory"));
+        assert!(
+            parsed["error"]
+                .as_str()
+                .unwrap()
+                .contains("not a directory")
+        );
     }
 }
