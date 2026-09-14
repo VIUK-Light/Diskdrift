@@ -55,7 +55,7 @@ Every command supports `--json` (stable schema, `version: 1`) for scripting and
 future GUIs.
 
 DiskDrift is **read-only by design**. There is no `clean`, `delete`, `rm` or
-`purge` command, and there never will be in v0.1.
+`purge` command; destructive cleanup remains out of scope.
 
 ---
 
@@ -159,7 +159,7 @@ The release binaries are unsigned; see the Gatekeeper note below.
 ### Build from source (recommended)
 
 ```bash
-git clone https://github.com/<your-account>/diskdrift.git
+git clone https://github.com/VIUK-Light/Diskdrift.git
 cd diskdrift
 cargo build --release
 install -m 755 target/release/diskdrift /usr/local/bin/diskdrift
@@ -624,7 +624,7 @@ trade-offs.
 - **Protected locations are skipped** unless Full Disk Access is granted. The
   scan reports how many locations were skipped; run `diskdrift doctor` for
   details.
-- v0.1 scans a curated set of locations (see `src/scanners/`), not the entire
+- DiskDrift scans a curated set of locations (see `src/scanners/`), not the entire
   filesystem. Use `--root` to scan anything else.
 - Sizes are allocated (on-disk) bytes in terminal output; JSON contains both
   `logical_bytes` and `allocated_bytes`.

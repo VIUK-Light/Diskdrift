@@ -1,7 +1,7 @@
-# DiskDrift v0.1 — Design
+# DiskDrift — Design
 
 This document records the architecture and the technical decisions that shape
-DiskDrift v0.1. The priority order is:
+DiskDrift through v0.6. The priority order is:
 
 1. **Trustworthiness of scan results** over feature count.
 2. **Safety** — DiskDrift must never be able to destroy data.
@@ -326,13 +326,11 @@ Consumers should check `version`.
 - `gui/smoke.sh` compiles a headless Swift program against the C ABI and
   verifies version, disk usage, scan, snapshot, history and error paths.
 
-## 12. Future work (explicitly not v0.1)
+## 12. Future work
 
-- FSEvents-based change timeline: "between 13:20 and 13:30, CoreSimulator grew
-  by 17 GB".
 - Anomalous growth detection, reclaimable-space estimation.
 - `getattrlistbulk` fast path for directory enumeration.
 - APFS snapshot and Time Machine analysis.
 - Menu bar / TUI front ends on top of the JSON schema.
 - Safe, explicitly opt-in cleanup — requires a separate design and review
-  process; v0.1 has no deletion capability at all.
+  process; DiskDrift has no deletion capability.
