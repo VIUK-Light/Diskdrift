@@ -133,12 +133,15 @@ macOS 11+). Unsigned `.app.zip` archives are also attached to
 [Releases](https://github.com/VIUK-Light/Diskdrift/releases); unzip, move to
 `/Applications` and right-click → Open the first time.
 
-The GUI has four screens:
+The GUI has four screens plus a resident menu bar:
 
 - **Dashboard** — volume usage, last 24 hours growth, "Scan now" / "Take snapshot"
 - **Storage** — category bars and the largest tracked directories
 - **History** — day-over-day changes per category (needs snapshots)
 - **What Happened** — incidents from the watch event log
+- **Menu bar** — free space, today's change or disk usage in the menu bar,
+  with a panel showing the biggest growth and a local alert when free space
+  is low or storage grows faster than your thresholds (Settings, ⌘,)
 
 ### Prebuilt binaries
 

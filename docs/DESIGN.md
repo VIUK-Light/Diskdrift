@@ -326,6 +326,18 @@ Consumers should check `version`.
 - `gui/smoke.sh` compiles a headless Swift program against the C ABI and
   verifies version, disk usage, scan, snapshot, history and error paths.
 
+## 11c. Menu bar (v0.7)
+
+- The same app hosts a `MenuBarExtra` (window style) with a panel that
+  refreshes periodically through the C ABI (`dd_disk_usage`,
+  `dd_what_happened` with `from: "00:00"` for today's change).
+- Display modes and alert thresholds live in `UserDefaults`
+  (`SettingsKeys`), editable in the SwiftUI Settings scene.
+- Alerts are evaluated locally on each refresh: free space below a
+  threshold, growth per hour, growth per day. Notifications use
+  `UNUserNotificationCenter`; when permission is unavailable the panel
+  shows the alert instead. No network, no account.
+
 ## 12. Future work
 
 - Anomalous growth detection, reclaimable-space estimation.
