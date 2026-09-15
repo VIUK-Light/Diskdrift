@@ -1,5 +1,7 @@
 # DiskDrift
 
+**v1.0 — stable CLI + macOS GUI + menu bar suite.**
+
 [![CI](https://github.com/VIUK-Light/Diskdrift/actions/workflows/ci.yml/badge.svg)](https://github.com/VIUK-Light/Diskdrift/actions/workflows/ci.yml)
 [![Release](https://github.com/VIUK-Light/Diskdrift/actions/workflows/release.yml/badge.svg)](https://github.com/VIUK-Light/Diskdrift/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -222,10 +224,11 @@ diskdrift what-happened [--since <duration>] [--from <HH:MM>] [--to <HH:MM>]
                         [--limit <n>] [--json]
 diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
 diskdrift doctor [--json]
-diskdrift snapshots [--json]
 diskdrift help [command]
 diskdrift version
 ```
+
+All commands support `--json` with the stable schema (`version: 1`).
 
 Global options:
 
@@ -746,16 +749,16 @@ docs/DESIGN.md  architecture and design decisions
 
 | Version | Theme |
 | --- | --- |
-| v0.1 | Core + scan + snapshot + diff (released) |
-| v0.2 | Better scanner: `top`, path scans, `--depth`, config, more tools |
-| v0.3 | History: `history`, `diff --since`, snapshot management |
-| v0.4 | Watch: FSEvents-based change monitoring |
-| v0.5 | What happened: turn event history into explanations |
-| v0.6 | macOS GUI (SwiftUI on top of the core library) |
-| v0.7 | Menu bar app and local storage alerts |
-| v0.8 | Deep macOS storage: APFS snapshots, purgeable space, VM/swap |
-| v0.9 | Duplicates and recommendations |
-| v1.0 | Stable CLI + GUI + menu bar suite |
+| v0.1 | Core + scan + snapshot + diff — released |
+| v0.2 | Better scanner: `top`, path scans, `--depth`, config, more tools — released |
+| v0.3 | History: `history`, `diff --since`, snapshot management — released |
+| v0.4 | Watch: FSEvents-based change monitoring — released |
+| v0.5 | What happened: turn event history into explanations — released |
+| v0.6 | macOS GUI (SwiftUI on top of the core library) — released |
+| v0.7 | Menu bar app and local storage alerts — released |
+| v0.8 | Deep macOS storage: volumes, snapshots, VM/swap — released |
+| v0.9 | Duplicates and recommendations — released |
+| v1.0 | Stable CLI + GUI + menu bar suite — released |
 
 The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md). Destructive cleanup
 is explicitly out of scope at every stage: DiskDrift is an analyzer, not a

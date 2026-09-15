@@ -44,9 +44,9 @@ pub fn volumes() -> Result<Vec<VolumeInfo>> {
             continue;
         }
         let block = fs.f_bsize as u64;
-        let total = fs.f_blocks as u64 * block;
-        let free = fs.f_bfree as u64 * block;
-        let available = fs.f_bavail as u64 * block;
+        let total = fs.f_blocks * block;
+        let free = fs.f_bfree * block;
+        let available = fs.f_bavail * block;
         let is_system =
             mount_point.starts_with("/System/") || mount_point == "/System/Volumes/Data";
         out.push(VolumeInfo {

@@ -134,7 +134,7 @@ mod tests {
         write(&tmp.0.join("big.bin"), 200_000);
         write(&tmp.0.join("nested/mid.bin"), 80_000);
 
-        let files = largest_files(&[tmp.0.clone()], 2, 0, &[]);
+        let files = largest_files(std::slice::from_ref(&tmp.0), 2, 0, &[]);
         assert_eq!(files.len(), 2);
         assert!(files[0].path.ends_with("big.bin"));
         assert!(files[1].path.ends_with("mid.bin"));
@@ -151,7 +151,7 @@ mod tests {
 
         // min_size compares allocated (on-disk) bytes, so 8 KiB excludes the
         // 4 KiB tiny file while keeping the 50 KB one.
-        let files = largest_files(&[tmp.0.clone()], 10, 8_000, &[]);
+        let files = largest_files(std::slice::from_ref(&tmp.0), 10, 8_000, &[]);
         assert_eq!(files.len(), 1, "hard links and tiny files are skipped");
         let name = files[0]
             .path

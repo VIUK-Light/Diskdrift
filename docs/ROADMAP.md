@@ -20,17 +20,18 @@ DiskDrift Core
 
 ストレージ解析ロジックを GUI 内に直接実装しない。
 
-| Version | Theme |
-| --- | --- |
-| v0.2 | Better Scanner — 現在のストレージ構造を正確に理解する |
-| v0.3 | History — 「どれだけ増えた？」 |
-| v0.4 | Watch — 「いつ増えた？」 |
-| v0.5 | What Happened? — 低レベル変更履歴を説明に変える |
-| v0.6 | macOS GUI |
-| v0.7 | Menu Bar |
-| v0.8 | macOS Deep Storage |
-| v0.9 | Duplicates + Recommendations |
-| v1.0 | Stable CLI + GUI + Menu Bar |
+| Version | Theme | Status |
+| --- | --- | --- |
+| v0.1 | Core + Scan + Snapshot + Diff | ✅ released |
+| v0.2 | Better Scanner — 現在のストレージ構造を正確に理解する | ✅ released |
+| v0.3 | History — 「どれだけ増えた？」 | ✅ released |
+| v0.4 | Watch — 「いつ増えた？」 | ✅ released |
+| v0.5 | What Happened? — 低レベル変更履歴を説明に変える | ✅ released |
+| v0.6 | macOS GUI | ✅ released |
+| v0.7 | Menu Bar | ✅ released |
+| v0.8 | macOS Deep Storage | ✅ released |
+| v0.9 | Duplicates + Recommendations | ✅ released |
+| v1.0 | Stable CLI + GUI + Menu Bar | ✅ released |
 
 ---
 
@@ -644,16 +645,16 @@ No AI API / No tracking
 ## Release Structure
 
 ```text
-v0.1  Core + Scan + Snapshot + Diff
-v0.2  Detailed Scanner
-v0.3  History
-v0.4  Watch / FSEvents
-v0.5  What Happened
-v0.6  macOS GUI
-v0.7  Menu Bar
-v0.8  Deep macOS Storage
-v0.9  Duplicates + Recommendations
-v1.0  Stable CLI + GUI + Menu Bar
+v0.1  Core + Scan + Snapshot + Diff          ✅
+v0.2  Detailed Scanner                        ✅
+v0.3  History                                 ✅
+v0.4  Watch / FSEvents                        ✅
+v0.5  What Happened                           ✅
+v0.6  macOS GUI                               ✅
+v0.7  Menu Bar                                ✅
+v0.8  Deep macOS Storage                      ✅
+v0.9  Duplicates + Recommendations            ✅
+v1.0  Stable CLI + GUI + Menu Bar             ✅
 ```
 
 ## 核心

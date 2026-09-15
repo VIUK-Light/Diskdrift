@@ -1,5 +1,9 @@
 # DiskDrift — Design
 
+> v1.0 scope: CLI + macOS GUI + menu bar on one Rust core, with a stable
+> JSON schema (`version: 1`) and a read-only guarantee. No account, no
+> cloud, no telemetry, no destructive operations.
+
 This document records the architecture and the technical decisions that shape
 DiskDrift through v0.6. The priority order is:
 

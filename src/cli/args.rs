@@ -855,7 +855,7 @@ fn parse_doctor(rest: &[String]) -> Result<Command, String> {
 
 fn parse_simple(
     rest: &[String],
-    name: &str,
+    command_name: &str,
     make: fn(CommonArgs) -> Command,
 ) -> Result<Command, String> {
     let mut args = Args::new(rest);
@@ -865,7 +865,9 @@ fn parse_simple(
             continue;
         }
         match name.as_str() {
-            "-h" | "--help" => return Ok(Command::Help(Some(name.to_string()))),
+            "-h" | "--help" => {
+                return Ok(Command::Help(Some(command_name.to_string())));
+            }
             other => return Err(format!("unknown option '{other}'")),
         }
     }

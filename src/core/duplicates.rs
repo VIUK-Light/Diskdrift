@@ -345,7 +345,7 @@ mod tests {
         write(&tmp.0.join("nested/b.bin"), &data);
         write(&tmp.0.join("other/c.bin"), &payload(9, 200_000));
 
-        let report = find_duplicates(&[tmp.0.clone()], 1_000, 10, false, &[]);
+        let report = find_duplicates(std::slice::from_ref(&tmp.0), 1_000, 10, false, &[]);
         assert_eq!(report.groups.len(), 1);
         assert_eq!(report.groups[0].files.len(), 2);
         assert!(report.groups[0].reclaimable >= 200_000);
@@ -362,12 +362,12 @@ mod tests {
         write(&tmp.0.join("a.bin"), &exact);
         write(&tmp.0.join("b.bin"), &near_miss);
 
-        let report = find_duplicates(&[tmp.0.clone()], 1_000, 10, false, &[]);
+        let report = find_duplicates(std::slice::from_ref(&tmp.0), 1_000, 10, false, &[]);
         assert!(report.groups.is_empty());
 
         // A true copy of a.bin (not of the near miss) must be found.
         write(&tmp.0.join("c.bin"), &exact);
-        let report = find_duplicates(&[tmp.0.clone()], 1_000, 10, false, &[]);
+        let report = find_duplicates(std::slice::from_ref(&tmp.0), 1_000, 10, false, &[]);
         assert_eq!(report.groups.len(), 1, "only the truly identical pair");
         assert_eq!(report.groups[0].files.len(), 2);
         let names: Vec<String> = report.groups[0]
@@ -387,7 +387,7 @@ mod tests {
         write(&tmp.0.join("a.bin"), &data);
         std::fs::hard_link(tmp.0.join("a.bin"), tmp.0.join("b.bin")).unwrap();
 
-        let report = find_duplicates(&[tmp.0.clone()], 1_000, 10, false, &[]);
+        let report = find_duplicates(std::slice::from_ref(&tmp.0), 1_000, 10, false, &[]);
         assert!(report.groups.is_empty(), "hard links share the same blocks");
     }
 
@@ -399,7 +399,7 @@ mod tests {
         write(&tmp.0.join("backup/Qwen3-8B-Q4_K_M.gguf"), &data);
         write(&tmp.0.join("notes.bin"), &data);
 
-        let report = find_duplicates(&[tmp.0.clone()], 1_000, 10, true, &[]);
+        let report = find_duplicates(std::slice::from_ref(&tmp.0), 1_000, 10, true, &[]);
         assert_eq!(report.groups.len(), 1);
         let model = report.groups[0].model.as_ref().expect("model info");
         assert_eq!(model.name, "Qwen3-8B");
