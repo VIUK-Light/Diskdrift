@@ -109,6 +109,9 @@ pub enum Command {
     Explain(ExplainArgs),
     Doctor(CommonArgs),
     Snapshots(CommonArgs),
+    MacSnapshots(CommonArgs),
+    Volumes(CommonArgs),
+    System(CommonArgs),
     Help(Option<String>),
     Version,
 }
@@ -134,7 +137,9 @@ pub fn parse(argv: &[String]) -> Result<Command, String> {
         "what-happened" => parse_what_happened(rest),
         "explain" => parse_explain(rest),
         "doctor" => parse_doctor(rest),
-        "snapshots" | "list" => parse_snapshots(rest),
+        "snapshots" => parse_simple(rest, "snapshots", Command::MacSnapshots),
+        "volumes" => parse_simple(rest, "volumes", Command::Volumes),
+        "system" => parse_simple(rest, "system", Command::System),
         "help" | "--help" | "-h" => Ok(Command::Help(rest.first().cloned())),
         "version" | "--version" | "-V" => Ok(Command::Version),
         other => Err(format!("unknown command '{other}'")),
@@ -676,6 +681,25 @@ fn parse_doctor(rest: &[String]) -> Result<Command, String> {
     Ok(Command::Doctor(common))
 }
 
+fn parse_simple(
+    rest: &[String],
+    name: &str,
+    make: fn(CommonArgs) -> Command,
+) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "-h" | "--help" => return Ok(Command::Help(Some(name.to_string()))),
+            other => return Err(format!("unknown option '{other}'")),
+        }
+    }
+    Ok(make(common))
+}
+
 fn parse_snapshots(rest: &[String]) -> Result<Command, String> {
     let mut args = Args::new(rest);
     let mut common = CommonArgs::default();
@@ -701,9 +725,12 @@ Usage:
                 [--threads <n>] [--json] [--no-progress]
   diskdrift snapshot [<path>] [--depth <n>] [--root <path>]... [--threads <n>]
                      [--json] [--no-progress]
-  diskdrift snapshot list [--json]
+  diskdrift snapshot list [--json]                 DiskDrift's snapshots
   diskdrift snapshot show <id> [--json]
   diskdrift snapshot delete <id> [--yes]
+  diskdrift snapshots [--json]                     macOS local (Time Machine) snapshots
+  diskdrift volumes [--json]                       mounted volumes
+  diskdrift system [--json]                        volumes, snapshots, VM/swap, caches
   diskdrift diff [<old>] [<new>] [--json] [--top <n>]
   diskdrift diff --since <duration> [--json] [--top <n>]
   diskdrift history [<category>] [--json]
@@ -915,6 +942,26 @@ mod tests {
         );
         assert!(parse(&args(&["what-happened", "--from", "25:00"])).is_err());
         assert!(parse(&args(&["what-happened", "--since", "yesterday"])).is_err());
+    }
+
+    #[test]
+    fn parses_system_commands() {
+        assert!(matches!(
+            parse(&args(&["system", "--json"])).unwrap(),
+            Command::System(_)
+        ));
+        assert!(matches!(
+            parse(&args(&["volumes"])).unwrap(),
+            Command::Volumes(_)
+        ));
+        assert!(matches!(
+            parse(&args(&["snapshots", "--json"])).unwrap(),
+            Command::MacSnapshots(_)
+        ));
+        assert!(matches!(
+            parse(&args(&["snapshot", "list"])).unwrap(),
+            Command::Snapshots(_)
+        ));
     }
 
     #[test]

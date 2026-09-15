@@ -6,6 +6,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case storage = "Storage"
     case history = "History"
     case whatHappened = "What Happened"
+    case system = "System"
 
     var id: String { rawValue }
 
@@ -15,6 +16,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .storage: return "internaldrive"
         case .history: return "chart.bar"
         case .whatHappened: return "clock.arrow.circlepath"
+        case .system: return "externaldrive"
         }
     }
 }
@@ -55,6 +57,7 @@ struct ContentView: View {
         case .storage: StorageView()
         case .history: HistoryView()
         case .whatHappened: WhatHappenedView()
+        case .system: SystemView()
         }
     }
 

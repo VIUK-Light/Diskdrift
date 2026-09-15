@@ -48,6 +48,8 @@ It is not a cleaner.
 - **`snapshots`** — lists stored snapshots (IDs, timestamps, tracked size).
 - **`watch` / `events` / `what-happened`** — record filesystem changes locally
   and explain what happened in a time window.
+- **`system` / `volumes` / `snapshots`** — deep macOS storage: APFS volumes,
+  Time Machine local snapshots, VM/swap and system caches.
 - **macOS GUI** — a native SwiftUI app (Dashboard, Storage, History, What
   Happened) that links the same Rust core directly.
 
@@ -200,6 +202,9 @@ diskdrift snapshot [<path>] [--depth <n>] [--root <path>]... [--threads <n>]
 diskdrift snapshot list [--json]
 diskdrift snapshot show <id> [--json]
 diskdrift snapshot delete <id> [--yes]
+diskdrift snapshots [--json]                     macOS local snapshots
+diskdrift volumes [--json]                       mounted volumes
+diskdrift system [--json]                        volumes, snapshots, VM/swap, caches
 diskdrift diff [<old>] [<new>] [--json] [--top <n>]
 diskdrift diff --since <duration> [--json] [--top <n>]
 diskdrift history [<category>] [--json]
@@ -325,7 +330,10 @@ diskdrift snapshot delete 12 --yes
 
 `snapshot delete` removes only DiskDrift's own metadata — never user files.
 In a terminal it asks for confirmation; without a TTY it requires `--yes`.
-The legacy `diskdrift snapshots` command is an alias of `snapshot list`.
+
+> **Changed in v0.8:** top-level `diskdrift snapshots` now lists **macOS local
+> (Time Machine) snapshots**. DiskDrift's own snapshots are managed with
+> `diskdrift snapshot list|show|delete`.
 
 ### diff
 
@@ -415,6 +423,35 @@ Storage events
 
 Events are stored as metadata only (time, path, category, byte delta) in the
 same local SQLite database. `events` reads them; it never touches files.
+
+### system / volumes / snapshots (macOS deep storage)
+
+```bash
+diskdrift system       # volumes, local snapshots, VM/swap, system caches
+diskdrift volumes      # mounted volumes with capacity
+diskdrift snapshots    # macOS local (Time Machine) snapshots
+```
+
+```text
+macOS System Storage (estimated)
+
+Volumes
+  /                                994.7 GB total   412.3 GB used    88.4 GB available
+
+Local snapshots
+  12 snapshots  ·  latest 2026-09-14 10:22:33  ·  macOS managed
+
+VM / Swap
+  /private/var/vm                       8.1 GB  ·  macOS managed
+
+System caches
+  /Library/Caches                       5.8 GB  ·  likely reclaimable
+```
+
+These commands label estimates honestly: local snapshots and VM/swap are
+**macOS managed** (blocks are shared with the volume), and system caches are
+**likely reclaimable** but never removed by DiskDrift. `--json` exposes the
+same data with `version: 1`.
 
 ### what-happened
 
@@ -637,6 +674,10 @@ trade-offs.
   replay events from before it started, and events are reported at directory
   granularity, not per file. Deep paths without a baseline are compared
   against their nearest known directory.
+- `system`, `volumes` and `snapshots` report what is observable from user
+  space. Snapshot sizes are not attributed to individual snapshots because
+  APFS shares blocks; purgeable space is macOS-managed and cannot be
+  measured exactly.
 
 ## Development
 

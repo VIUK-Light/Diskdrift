@@ -6,6 +6,9 @@ use crate::core::doctor::DoctorReport;
 use crate::core::explain::{ExplainOutput, display_path};
 use crate::core::fs;
 use crate::core::history::HistoryDay;
+use crate::core::local_snapshot::LocalSnapshot;
+use crate::core::system::SystemReport;
+use crate::core::volumes::VolumeInfo;
 use crate::core::scan::ScanOutput;
 use crate::core::size;
 use crate::core::snapshot::{CatVal, EventRow, SnapshotMeta};
@@ -384,6 +387,119 @@ pub fn render_doctor<W: Write>(w: &mut W, d: &DoctorReport, home: &Path) -> io::
         w,
         "DiskDrift never deletes files and never sends data over the network."
     )?;
+    Ok(())
+}
+
+pub fn render_volumes<W: Write>(w: &mut W, volumes: &[VolumeInfo]) -> io::Result<()> {
+    writeln!(w, "Volumes")?;
+    writeln!(w)?;
+    if volumes.is_empty() {
+        writeln!(w, "No local volumes found.")?;
+        return Ok(());
+    }
+    for volume in volumes {
+        let system = if volume.is_system { "  (system)" } else { "" };
+        writeln!(w, "{}{}", volume.mount_point.display(), system)?;
+        writeln!(w, "  {} · {}", volume.device, volume.fs_type)?;
+        writeln!(
+            w,
+            "  {} total · {} used · {} available",
+            size::format_bytes(volume.total),
+            size::format_bytes(volume.used),
+            size::format_bytes(volume.available)
+        )?;
+        writeln!(w)?;
+    }
+    Ok(())
+}
+
+pub fn render_local_snapshots<W: Write>(
+    w: &mut W,
+    snapshots: &[LocalSnapshot],
+) -> io::Result<()> {
+    writeln!(w, "macOS local snapshots")?;
+    writeln!(w)?;
+    if snapshots.is_empty() {
+        writeln!(
+            w,
+            "No local snapshots found (or tmutil is unavailable)."
+        )?;
+        return Ok(());
+    }
+    writeln!(
+        w,
+        "{} snapshots (macOS managed; blocks are shared with the volume)",
+        size::format_count(snapshots.len() as u64)
+    )?;
+    writeln!(w)?;
+    for snapshot in snapshots {
+        match &snapshot.date {
+            Some(date) => writeln!(w, "  {date}  {}", snapshot.name)?,
+            None => writeln!(w, "  {}", snapshot.name)?,
+        }
+    }
+    Ok(())
+}
+
+pub fn render_system<W: Write>(w: &mut W, report: &SystemReport) -> io::Result<()> {
+    writeln!(w, "macOS System Storage (estimated)")?;
+    writeln!(w)?;
+
+    writeln!(w, "Volumes")?;
+    for volume in &report.volumes {
+        writeln!(
+            w,
+            "  {:<28}{:>12} total{:>12} used{:>12} available",
+            volume.mount_point.display().to_string(),
+            size::format_bytes(volume.total),
+            size::format_bytes(volume.used),
+            size::format_bytes(volume.available)
+        )?;
+    }
+
+    writeln!(w)?;
+    writeln!(w, "Local snapshots")?;
+    if let Some(latest) = crate::core::local_snapshot::latest(&report.local_snapshots) {
+        writeln!(
+            w,
+            "  {} snapshots  ·  latest {}  ·  macOS managed",
+            size::format_count(report.local_snapshots.len() as u64),
+            latest
+        )?;
+    } else {
+        writeln!(w, "  none found  ·  macOS managed")?;
+    }
+
+    writeln!(w)?;
+    writeln!(w, "VM / Swap")?;
+    match &report.vm {
+        Some(vm) => writeln!(
+            w,
+            "  {:<28}{:>12}  ·  macOS managed",
+            vm.path.display().to_string(),
+            size::format_bytes(vm.allocated)
+        )?,
+        None => writeln!(w, "  not readable  ·  macOS managed")?,
+    }
+
+    writeln!(w)?;
+    writeln!(w, "System caches")?;
+    match &report.caches {
+        Some(caches) => writeln!(
+            w,
+            "  {:<28}{:>12}  ·  likely reclaimable",
+            caches.path.display().to_string(),
+            size::format_bytes(caches.allocated)
+        )?,
+        None => writeln!(w, "  not readable")?,
+    }
+
+    if !report.notes.is_empty() {
+        writeln!(w)?;
+        for note in &report.notes {
+            writeln!(w, "Note: {note}")?;
+        }
+    }
     Ok(())
 }
 

@@ -31,6 +31,9 @@ char *dd_scan(const char *home, const char *data_dir, const char *path,
 char *dd_snapshot(const char *home, const char *data_dir, const char *path,
                   int32_t depth, int32_t threads);
 
+/* Deep macOS storage: volumes, local snapshots, VM/swap, system caches. */
+char *dd_system(const char *home, int32_t threads);
+
 /* History for all categories (category == NULL) or one category token. */
 char *dd_history(const char *home, const char *data_dir, const char *category);
 

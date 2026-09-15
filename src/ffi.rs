@@ -234,6 +234,25 @@ pub extern "C" fn dd_snapshot(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dd_system(home: *const c_char, threads: i32) -> *mut c_char {
+    match system_impl(home, threads) {
+        Ok(value) => ok(&value),
+        Err(e) => err(&e),
+    }
+}
+
+fn system_impl(home: *const c_char, threads: i32) -> Result<json::SystemJson> {
+    let home = resolve_home(cstr(home, "home")?);
+    let threads = if threads > 0 {
+        threads as usize
+    } else {
+        scan::default_threads()
+    };
+    let report = crate::core::system::report(&home, threads);
+    Ok(json::system(&report))
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dd_history(
     home: *const c_char,
     data_dir: *const c_char,
@@ -427,6 +446,15 @@ mod tests {
         assert_eq!(parsed["totals"]["logical_bytes"].as_u64().unwrap(), 4_000);
         assert!(parsed.get("error").is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn system_payload_has_volumes() {
+        let value = take(dd_system(std::ptr::null(), 1));
+        let parsed: serde_json::Value = serde_json::from_str(&value).unwrap();
+        assert_eq!(parsed["command"], "system");
+        assert!(!parsed["volumes"].as_array().unwrap().is_empty());
+        assert!(parsed.get("error").is_none());
     }
 
     #[test]

@@ -338,6 +338,18 @@ Consumers should check `version`.
   `UNUserNotificationCenter`; when permission is unavailable the panel
   shows the alert instead. No network, no account.
 
+## 11d. Deep macOS storage (v0.8)
+
+- `volumes`: `getmntinfo(3)`; pseudo filesystems (devfs, autofs, nfs, …) are
+  filtered out and system volumes are marked.
+- `snapshots`: `tmutil listlocalsnapshots /` (read-only, no root) with a pure
+  parser (`parse_tmutil_output`) so the format is unit-tested.
+- `system`: combines volumes, snapshots, `/private/var/vm` and
+  `/Library/Caches` (measured through the scanner) and labels each value as
+  **macOS managed** or **likely reclaimable**. No sizes are attributed to
+  individual APFS snapshots because blocks are shared with the volume.
+- The GUI System screen renders the same schema-1 JSON through `dd_system`.
+
 ## 12. Future work
 
 - Anomalous growth detection, reclaimable-space estimation.

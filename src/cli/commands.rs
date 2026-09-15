@@ -14,12 +14,15 @@ use crate::core::error::{Error, Result};
 use crate::core::explain::{self, ResolvedQuery};
 use crate::core::fs::ProgressCounters;
 use crate::core::history;
+use crate::core::local_snapshot;
+use crate::core::system;
 use crate::core::json;
 use crate::core::paths;
 use crate::core::scan::{self, ScanConfig, ScanTarget};
 use crate::core::size;
 use crate::core::store::Store;
 use crate::core::time;
+use crate::core::volumes;
 use crate::core::watch::{self, WatchEntry, WatchState};
 use crate::core::what_happened;
 use crate::scanners;
@@ -50,6 +53,9 @@ pub fn run(cmd: Command) -> Result<i32> {
         Command::Explain(args) => cmd_explain(args),
         Command::Doctor(common) => cmd_doctor(common),
         Command::Snapshots(common) => cmd_snapshots(common),
+        Command::MacSnapshots(common) => cmd_mac_snapshots(common),
+        Command::Volumes(common) => cmd_volumes(common),
+        Command::System(common) => cmd_system(common),
         Command::Help(_) => {
             print!("{}", crate::cli::args::usage());
             Ok(EXIT_OK)
@@ -829,6 +835,46 @@ fn cmd_doctor(common: CommonArgs) -> Result<i32> {
         let stdout = io::stdout();
         let mut w = stdout.lock();
         render::render_doctor(&mut w, &report, &home)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
+fn cmd_mac_snapshots(common: CommonArgs) -> Result<i32> {
+    let snapshots = local_snapshot::list();
+    if common.json {
+        println!("{}", json::to_pretty(&json::local_snapshots(&snapshots)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_local_snapshots(&mut w, &snapshots)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
+fn cmd_volumes(common: CommonArgs) -> Result<i32> {
+    let volumes = volumes::volumes()?;
+    if common.json {
+        println!("{}", json::to_pretty(&json::volumes(&volumes)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_volumes(&mut w, &volumes)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
+fn cmd_system(common: CommonArgs) -> Result<i32> {
+    let home = resolve_home();
+    let report = system::report(&home, scan::default_threads());
+    if common.json {
+        println!("{}", json::to_pretty(&json::system(&report)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_system(&mut w, &report)?;
         w.flush()?;
     }
     Ok(EXIT_OK)

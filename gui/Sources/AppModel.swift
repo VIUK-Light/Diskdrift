@@ -9,6 +9,8 @@ final class AppModel: ObservableObject {
     @Published var scan: ScanResult?
     @Published var history: HistoryResult?
     @Published var whatHappened: WhatHappenedResult?
+    @Published var system: SystemResult?
+    @Published var systemMessage: String?
     @Published var isBusy = false
     @Published var status = "Ready"
     @Published var errorMessage: String?
@@ -54,6 +56,27 @@ final class AppModel: ObservableObject {
                     + formatBytes(result.snapshot.totalAllocatedBytes)
                 self.loadHistory(category: self.selectedHistoryCategory)
             })
+    }
+
+    func loadSystem() {
+        let home = self.home
+        isBusy = true
+        Task.detached(priority: .userInitiated) {
+            do {
+                let value = try Core.system(home: home, threads: 0)
+                await MainActor.run {
+                    self.system = value
+                    self.systemMessage = nil
+                    self.isBusy = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.system = nil
+                    self.systemMessage = error.localizedDescription
+                    self.isBusy = false
+                }
+            }
+        }
     }
 
     /// History and events are optional on first run: show an empty state

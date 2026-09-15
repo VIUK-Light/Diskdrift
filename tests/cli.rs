@@ -129,7 +129,7 @@ fn snapshot_then_diff_reports_changes() {
         allocated_bytes(&added) as i64
     );
 
-    let list = diskdrift(&home, &data, &["snapshots", "--json"]);
+    let list = diskdrift(&home, &data, &["snapshot", "list", "--json"]);
     assert!(list.status.success());
     assert_eq!(json(&list)["snapshots"].as_array().unwrap().len(), 2);
 
@@ -437,8 +437,10 @@ fn snapshot_subcommands_and_history() {
         String::from_utf8_lossy(&list.stderr)
     );
     assert_eq!(json(&list)["snapshots"].as_array().unwrap().len(), 2);
-    let legacy = diskdrift(&home, &data, &["snapshots", "--json"]);
-    assert_eq!(json(&legacy)["snapshots"].as_array().unwrap().len(), 2);
+    // Top-level `snapshots` now lists macOS local snapshots; DiskDrift's own
+    // snapshots are under `snapshot list`.
+    let mac = diskdrift(&home, &data, &["snapshots", "--json"]);
+    assert_eq!(json(&mac)["command"], "snapshots");
 
     // snapshot show
     let show = diskdrift(&home, &data, &["snapshot", "show", "1", "--json"]);
@@ -710,4 +712,47 @@ fn what_happened_groups_events_into_incidents() {
     assert_eq!(json(&empty)["total"]["event_count"], 0);
     let human = diskdrift(&home, &data, &["what-happened", "--since", "1s"]);
     assert!(String::from_utf8_lossy(&human.stdout).contains("No watch events"));
+}
+
+#[test]
+fn system_volumes_and_macos_snapshots() {
+    let tmp = TempDir::new("cli-system");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    write_file(&home.join(".ollama/models/a.bin"), 1_000);
+
+    let volumes = diskdrift(&home, &data, &["volumes", "--json"]);
+    assert!(volumes.status.success(), "{}", String::from_utf8_lossy(&volumes.stderr));
+    let v = json(&volumes);
+    assert_eq!(v["command"], "volumes");
+    assert!(v["volumes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|volume| volume["mount_point"] == "/"));
+
+    let system = diskdrift(&home, &data, &["system", "--json"]);
+    assert!(system.status.success(), "{}", String::from_utf8_lossy(&system.stderr));
+    let v = json(&system);
+    assert_eq!(v["command"], "system");
+    assert!(!v["volumes"].as_array().unwrap().is_empty());
+    assert!(v["snapshot_count"].as_u64().is_some());
+    assert!(!v["notes"].as_array().unwrap().is_empty());
+    if let Some(vm) = v["vm"].as_object() {
+        assert_eq!(vm["label"], "macOS managed");
+    }
+
+    let snapshots = diskdrift(&home, &data, &["snapshots", "--json"]);
+    assert!(snapshots.status.success());
+    assert_eq!(json(&snapshots)["command"], "snapshots");
+
+    let human = diskdrift(&home, &data, &["system"]);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("macOS System Storage"));
+
+    // `snapshot list` still lists DiskDrift's own snapshots.
+    assert!(diskdrift(&home, &data, &["snapshot", "--no-progress", "--root", home.to_str().unwrap()])
+        .status
+        .success());
+    let list = diskdrift(&home, &data, &["snapshot", "list", "--json"]);
+    assert_eq!(json(&list)["snapshots"].as_array().unwrap().len(), 1);
 }

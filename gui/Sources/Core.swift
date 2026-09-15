@@ -121,6 +121,36 @@ struct WhatHappenedTotal: Decodable {
     let eventCount: Int
 }
 
+struct SystemVolume: Decodable, Identifiable {
+    let mountPoint: String
+    let device: String
+    let fsType: String
+    let totalBytes: UInt64
+    let usedBytes: UInt64
+    let freeBytes: UInt64
+    let availableBytes: UInt64
+    let isSystem: Bool
+    var id: String { mountPoint }
+}
+
+struct SystemPathSize: Decodable {
+    let path: String
+    let allocatedBytes: UInt64
+    let logicalBytes: UInt64
+    let fileCount: UInt64
+    let directoryCount: UInt64
+    let label: String
+}
+
+struct SystemResult: Decodable {
+    let volumes: [SystemVolume]
+    let snapshotCount: Int
+    let snapshotLatest: String?
+    let vm: SystemPathSize?
+    let systemCaches: SystemPathSize?
+    let notes: [String]
+}
+
 struct WhatHappenedResult: Decodable {
     let window: String
     let from: String
@@ -169,6 +199,12 @@ enum Core {
                 SnapshotResult.self,
                 from: call { dd_snapshot(cHome, cData, cPath, Int32(depth), Int32(threads)) }
             )
+        }
+    }
+
+    static func system(home: String?, threads: Int) throws -> SystemResult {
+        try withCString(home) { cHome in
+            try decode(SystemResult.self, from: call { dd_system(cHome, Int32(threads)) })
         }
     }
 

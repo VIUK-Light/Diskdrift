@@ -9,6 +9,9 @@ use crate::core::doctor::DoctorReport;
 use crate::core::explain::{ExplainOutput, display_path};
 use crate::core::fs::{self, Accum};
 use crate::core::history::HistoryDay;
+use crate::core::local_snapshot::LocalSnapshot;
+use crate::core::system::SystemReport;
+use crate::core::volumes::VolumeInfo;
 use crate::core::scan::ScanOutput;
 use crate::core::snapshot::{CatVal, EventDraft, EventRow, SnapshotMeta};
 use crate::core::time;
@@ -774,6 +777,139 @@ pub fn what_happened(report: &Report, window: &Window, home: &Path) -> WhatHappe
                 event_count: incident.event_count,
             })
             .collect(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct VolumeJson {
+    pub mount_point: String,
+    pub device: String,
+    pub fs_type: String,
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub free_bytes: u64,
+    pub available_bytes: u64,
+    pub is_system: bool,
+}
+
+fn volume_json(volume: &VolumeInfo) -> VolumeJson {
+    VolumeJson {
+        mount_point: volume.mount_point.to_string_lossy().to_string(),
+        device: volume.device.clone(),
+        fs_type: volume.fs_type.clone(),
+        total_bytes: volume.total,
+        used_bytes: volume.used,
+        free_bytes: volume.free,
+        available_bytes: volume.available,
+        is_system: volume.is_system,
+    }
+}
+
+#[derive(Serialize)]
+pub struct VolumesJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub volumes: Vec<VolumeJson>,
+}
+
+pub fn volumes(list: &[VolumeInfo]) -> VolumesJson {
+    VolumesJson {
+        version: SCHEMA_VERSION,
+        command: "volumes",
+        timestamp: time::format_local(time::now_unix()),
+        volumes: list.iter().map(volume_json).collect(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct LocalSnapshotJson {
+    pub name: String,
+    pub date: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct LocalSnapshotsJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub count: usize,
+    pub snapshots: Vec<LocalSnapshotJson>,
+    pub note: &'static str,
+}
+
+pub fn local_snapshots(list: &[LocalSnapshot]) -> LocalSnapshotsJson {
+    LocalSnapshotsJson {
+        version: SCHEMA_VERSION,
+        command: "snapshots",
+        timestamp: time::format_local(time::now_unix()),
+        count: list.len(),
+        snapshots: list
+            .iter()
+            .map(|s| LocalSnapshotJson {
+                name: s.name.clone(),
+                date: s.date.clone(),
+            })
+            .collect(),
+        note: "macOS-managed; snapshot blocks are shared with the volume",
+    }
+}
+
+#[derive(Serialize)]
+pub struct PathSizeJson {
+    pub path: String,
+    pub allocated_bytes: u64,
+    pub logical_bytes: u64,
+    pub file_count: u64,
+    pub directory_count: u64,
+    pub label: &'static str,
+}
+
+fn path_size_json(
+    size: &crate::core::system::PathSize,
+    label: &'static str,
+) -> PathSizeJson {
+    PathSizeJson {
+        path: size.path.to_string_lossy().to_string(),
+        allocated_bytes: size.allocated,
+        logical_bytes: size.logical,
+        file_count: size.files,
+        directory_count: size.dirs,
+        label,
+    }
+}
+
+#[derive(Serialize)]
+pub struct SystemJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub volumes: Vec<VolumeJson>,
+    pub snapshot_count: usize,
+    pub snapshot_latest: Option<String>,
+    pub vm: Option<PathSizeJson>,
+    pub system_caches: Option<PathSizeJson>,
+    pub notes: Vec<String>,
+}
+
+pub fn system(report: &SystemReport) -> SystemJson {
+    SystemJson {
+        version: SCHEMA_VERSION,
+        command: "system",
+        timestamp: time::format_local(time::now_unix()),
+        volumes: report.volumes.iter().map(volume_json).collect(),
+        snapshot_count: report.local_snapshots.len(),
+        snapshot_latest: crate::core::local_snapshot::latest(&report.local_snapshots)
+            .map(|s| s.to_string()),
+        vm: report
+            .vm
+            .as_ref()
+            .map(|size| path_size_json(size, "macOS managed")),
+        system_caches: report
+            .caches
+            .as_ref()
+            .map(|size| path_size_json(size, "Likely reclaimable")),
+        notes: report.notes.clone(),
     }
 }
 
