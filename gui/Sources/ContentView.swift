@@ -7,6 +7,8 @@ enum AppSection: String, CaseIterable, Identifiable {
     case history = "History"
     case whatHappened = "What Happened"
     case system = "System"
+    case duplicates = "Duplicates"
+    case insights = "Insights"
 
     var id: String { rawValue }
 
@@ -17,6 +19,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .history: return "chart.bar"
         case .whatHappened: return "clock.arrow.circlepath"
         case .system: return "externaldrive"
+        case .duplicates: return "doc.on.doc"
+        case .insights: return "lightbulb"
         }
     }
 }
@@ -58,6 +62,8 @@ struct ContentView: View {
         case .history: HistoryView()
         case .whatHappened: WhatHappenedView()
         case .system: SystemView()
+        case .duplicates: DuplicatesView()
+        case .insights: InsightsView()
         }
     }
 

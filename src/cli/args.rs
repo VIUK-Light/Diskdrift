@@ -66,6 +66,35 @@ pub struct EventsArgs {
 }
 
 #[derive(Debug, Clone)]
+pub struct LargeArgs {
+    pub common: CommonArgs,
+    pub roots: Vec<PathBuf>,
+    pub path: Option<PathBuf>,
+    pub limit: usize,
+    pub min_size: Option<String>,
+    pub threads: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DuplicatesArgs {
+    pub common: CommonArgs,
+    pub roots: Vec<PathBuf>,
+    pub path: Option<PathBuf>,
+    pub limit: usize,
+    pub min_size: Option<String>,
+    pub models: bool,
+    pub threads: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecommendationsArgs {
+    pub common: CommonArgs,
+    pub roots: Vec<PathBuf>,
+    pub path: Option<PathBuf>,
+    pub threads: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
 pub struct WhatHappenedArgs {
     pub common: CommonArgs,
     pub since: Option<String>,
@@ -104,6 +133,9 @@ pub enum Command {
     Watch(WatchArgs),
     Events(EventsArgs),
     WhatHappened(WhatHappenedArgs),
+    Large(LargeArgs),
+    Duplicates(DuplicatesArgs),
+    Recommendations(RecommendationsArgs),
     SnapshotShow(SnapshotShowArgs),
     SnapshotDelete(SnapshotDeleteArgs),
     Explain(ExplainArgs),
@@ -135,6 +167,9 @@ pub fn parse(argv: &[String]) -> Result<Command, String> {
         "watch" => parse_watch(rest),
         "events" => parse_events(rest),
         "what-happened" => parse_what_happened(rest),
+        "large" => parse_large(rest),
+        "duplicates" => parse_duplicates(rest),
+        "recommendations" => parse_recommendations(rest),
         "explain" => parse_explain(rest),
         "doctor" => parse_doctor(rest),
         "snapshots" => parse_simple(rest, "snapshots", Command::MacSnapshots),
@@ -503,6 +538,143 @@ fn parse_events(rest: &[String]) -> Result<Command, String> {
     }))
 }
 
+fn parse_size_flag(
+    args: &mut Args<'_>,
+    flag: &str,
+    inline: Option<String>,
+) -> Result<String, String> {
+    let value = args.value(flag, inline)?;
+    if crate::core::size::parse_size(&value).is_none() {
+        return Err(format!(
+            "{flag} expects a size like 10MB or 1GB, got '{value}'"
+        ));
+    }
+    Ok(value)
+}
+
+fn parse_large(rest: &[String]) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    let mut roots = Vec::new();
+    let mut path: Option<PathBuf> = None;
+    let mut limit = 20usize;
+    let mut min_size = None;
+    let mut threads = None;
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "--root" => roots.push(PathBuf::from(args.value("--root", inline)?)),
+            "--limit" => limit = parse_count(&mut args, "--limit", inline, 1, 10_000)?,
+            "--min-size" => min_size = Some(parse_size_flag(&mut args, "--min-size", inline)?),
+            "--threads" => threads = Some(parse_count(&mut args, "--threads", inline, 1, 1024)?),
+            "-h" | "--help" => return Ok(Command::Help(Some("large".into()))),
+            other if other.starts_with('-') && other != "-" => {
+                return Err(format!("unknown option '{other}'"));
+            }
+            other => {
+                if path.is_some() {
+                    return Err("large accepts at most one path".into());
+                }
+                path = Some(PathBuf::from(other));
+            }
+        }
+    }
+    if path.is_some() && !roots.is_empty() {
+        return Err("use either a path argument or --root, not both".into());
+    }
+    Ok(Command::Large(LargeArgs {
+        common,
+        roots,
+        path,
+        limit,
+        min_size,
+        threads,
+    }))
+}
+
+fn parse_duplicates(rest: &[String]) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    let mut roots = Vec::new();
+    let mut path: Option<PathBuf> = None;
+    let mut limit = 20usize;
+    let mut min_size = None;
+    let mut models = false;
+    let mut threads = None;
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "--root" => roots.push(PathBuf::from(args.value("--root", inline)?)),
+            "--limit" => limit = parse_count(&mut args, "--limit", inline, 1, 10_000)?,
+            "--min-size" => min_size = Some(parse_size_flag(&mut args, "--min-size", inline)?),
+            "--models" => models = true,
+            "--threads" => threads = Some(parse_count(&mut args, "--threads", inline, 1, 1024)?),
+            "-h" | "--help" => return Ok(Command::Help(Some("duplicates".into()))),
+            other if other.starts_with('-') && other != "-" => {
+                return Err(format!("unknown option '{other}'"));
+            }
+            other => {
+                if path.is_some() {
+                    return Err("duplicates accepts at most one path".into());
+                }
+                path = Some(PathBuf::from(other));
+            }
+        }
+    }
+    if path.is_some() && !roots.is_empty() {
+        return Err("use either a path argument or --root, not both".into());
+    }
+    Ok(Command::Duplicates(DuplicatesArgs {
+        common,
+        roots,
+        path,
+        limit,
+        min_size,
+        models,
+        threads,
+    }))
+}
+
+fn parse_recommendations(rest: &[String]) -> Result<Command, String> {
+    let mut args = Args::new(rest);
+    let mut common = CommonArgs::default();
+    let mut roots = Vec::new();
+    let mut path: Option<PathBuf> = None;
+    let mut threads = None;
+    while let Some((name, inline)) = args.next() {
+        if parse_common(&mut args, &name, inline.clone(), &mut common)? {
+            continue;
+        }
+        match name.as_str() {
+            "--root" => roots.push(PathBuf::from(args.value("--root", inline)?)),
+            "--threads" => threads = Some(parse_count(&mut args, "--threads", inline, 1, 1024)?),
+            "-h" | "--help" => return Ok(Command::Help(Some("recommendations".into()))),
+            other if other.starts_with('-') && other != "-" => {
+                return Err(format!("unknown option '{other}'"));
+            }
+            other => {
+                if path.is_some() {
+                    return Err("recommendations accepts at most one path".into());
+                }
+                path = Some(PathBuf::from(other));
+            }
+        }
+    }
+    if path.is_some() && !roots.is_empty() {
+        return Err("use either a path argument or --root, not both".into());
+    }
+    Ok(Command::Recommendations(RecommendationsArgs {
+        common,
+        roots,
+        path,
+        threads,
+    }))
+}
+
 fn parse_what_happened(rest: &[String]) -> Result<Command, String> {
     let mut args = Args::new(rest);
     let mut common = CommonArgs::default();
@@ -740,6 +912,9 @@ Usage:
   diskdrift events [--since <duration>] [--limit <n>] [--json]
   diskdrift what-happened [--since <duration>] [--from <HH:MM>] [--to <HH:MM>]
                           [--limit <n>] [--json]
+  diskdrift large [<path>] [--min-size <size>] [--limit <n>] [--json]
+  diskdrift duplicates [<path>] [--models] [--min-size <size>] [--limit <n>] [--json]
+  diskdrift recommendations [<path>] [--json]
   diskdrift explain <category|path> [--json] [--no-progress] [--threads <n>]
   diskdrift doctor [--json]
   diskdrift snapshots [--json]

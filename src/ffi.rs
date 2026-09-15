@@ -234,6 +234,150 @@ pub extern "C" fn dd_snapshot(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dd_large(
+    home: *const c_char,
+    data_dir: *const c_char,
+    path: *const c_char,
+    limit: i32,
+    min_size_bytes: u64,
+) -> *mut c_char {
+    match large_impl(home, data_dir, path, limit, min_size_bytes) {
+        Ok(value) => ok(&value),
+        Err(e) => err(&e),
+    }
+}
+
+fn large_impl(
+    home: *const c_char,
+    data_dir: *const c_char,
+    path: *const c_char,
+    limit: i32,
+    min_size_bytes: u64,
+) -> Result<json::LargeJson> {
+    let home = resolve_home(cstr(home, "home")?);
+    let data_dir = resolve_data_dir(cstr(data_dir, "data_dir")?, &home);
+    let path = cstr(path, "path")?.filter(|p| !p.is_empty());
+    let mut exclusions = vec![data_dir];
+    let config = Config::load(&home, None)?;
+    exclusions.extend(config.exclude.iter().cloned());
+    let targets = crate::scanners::default_targets(&home);
+    let paths: Vec<PathBuf> = match path {
+        Some(path) => vec![paths::expand_user_path(&path, &home)],
+        None => targets.into_iter().map(|t| t.path).collect(),
+    };
+    let min_size = if min_size_bytes > 0 {
+        min_size_bytes
+    } else {
+        10_000_000
+    };
+    let limit = if limit > 0 { limit as usize } else { 20 };
+    Ok(json::large(
+        &crate::core::large::largest_files(&paths, limit, min_size, &exclusions),
+        min_size,
+    ))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dd_duplicates(
+    home: *const c_char,
+    data_dir: *const c_char,
+    path: *const c_char,
+    limit: i32,
+    min_size_bytes: u64,
+    models_only: i32,
+) -> *mut c_char {
+    match duplicates_impl(home, data_dir, path, limit, min_size_bytes, models_only) {
+        Ok(value) => ok(&value),
+        Err(e) => err(&e),
+    }
+}
+
+fn duplicates_impl(
+    home: *const c_char,
+    data_dir: *const c_char,
+    path: *const c_char,
+    limit: i32,
+    min_size_bytes: u64,
+    models_only: i32,
+) -> Result<json::DuplicatesJson> {
+    let home = resolve_home(cstr(home, "home")?);
+    let data_dir = resolve_data_dir(cstr(data_dir, "data_dir")?, &home);
+    let path = cstr(path, "path")?.filter(|p| !p.is_empty());
+    let mut exclusions = vec![data_dir];
+    let config = Config::load(&home, None)?;
+    exclusions.extend(config.exclude.iter().cloned());
+    let targets = crate::scanners::default_targets(&home);
+    let paths: Vec<PathBuf> = match path {
+        Some(path) => vec![paths::expand_user_path(&path, &home)],
+        None => targets.into_iter().map(|t| t.path).collect(),
+    };
+    let min_size = if min_size_bytes > 0 {
+        min_size_bytes
+    } else {
+        1_000_000
+    };
+    let limit = if limit > 0 { limit as usize } else { 20 };
+    let report = crate::core::duplicates::find_duplicates(
+        &paths,
+        min_size,
+        limit,
+        models_only != 0,
+        &exclusions,
+    );
+    Ok(json::duplicates(&report, &home))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dd_recommendations(
+    home: *const c_char,
+    data_dir: *const c_char,
+    path: *const c_char,
+    threads: i32,
+) -> *mut c_char {
+    match recommendations_impl(home, data_dir, path, threads) {
+        Ok(value) => ok(&value),
+        Err(e) => err(&e),
+    }
+}
+
+fn recommendations_impl(
+    home: *const c_char,
+    data_dir: *const c_char,
+    path: *const c_char,
+    threads: i32,
+) -> Result<json::RecommendationsJson> {
+    let home = resolve_home(cstr(home, "home")?);
+    let data_dir = resolve_data_dir(cstr(data_dir, "data_dir")?, &home);
+    let path = cstr(path, "path")?.filter(|p| !p.is_empty());
+    let config = Config::load(&home, None)?;
+    let mut exclusions = vec![data_dir];
+    exclusions.extend(config.exclude.iter().cloned());
+    let targets = match path {
+        Some(path) => vec![crate::scanners::generic::target_for(
+            paths::expand_user_path(&path, &home),
+        )],
+        None => crate::scanners::default_targets(&home),
+    };
+    let threads = if threads > 0 {
+        threads as usize
+    } else {
+        scan::default_threads()
+    };
+    let out = scan::run(ScanConfig {
+        home: &home,
+        targets,
+        threads,
+        progress: None,
+        exclusions,
+        depth_override: None,
+    });
+    let rolled = crate::core::fs::rollup_categories(&out.walk.categories);
+    Ok(json::recommendations(
+        &crate::core::recommendations::recommendations(&rolled),
+    ))
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dd_system(home: *const c_char, threads: i32) -> *mut c_char {
     match system_impl(home, threads) {
         Ok(value) => ok(&value),
@@ -455,6 +599,31 @@ mod tests {
         assert_eq!(parsed["command"], "system");
         assert!(!parsed["volumes"].as_array().unwrap().is_empty());
         assert!(parsed.get("error").is_none());
+    }
+
+    #[test]
+    fn recommendations_payload() {
+        let dir = std::env::temp_dir().join(format!("diskdrift-ffi-rec-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".ollama/models")).unwrap();
+        std::fs::write(dir.join(".ollama/models/a.bin"), vec![0u8; 8_000]).unwrap();
+
+        let home = CString::new(dir.to_string_lossy().as_bytes()).unwrap();
+        let path = CString::new(dir.to_string_lossy().as_bytes()).unwrap();
+        let value = take(dd_recommendations(
+            home.as_ptr(),
+            std::ptr::null(),
+            path.as_ptr(),
+            1,
+        ));
+        let parsed: serde_json::Value = serde_json::from_str(&value).unwrap();
+        assert_eq!(parsed["command"], "recommendations");
+        let insights = parsed["insights"].as_array().unwrap();
+        assert!(
+            insights
+                .iter()
+                .any(|insight| insight["category_id"] == "ai.ollama")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

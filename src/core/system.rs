@@ -90,10 +90,12 @@ mod tests {
     fn report_has_root_volume() {
         let home = std::env::temp_dir();
         let report = report(&home, 1);
-        assert!(report
-            .volumes
-            .iter()
-            .any(|v| v.mount_point == std::path::Path::new("/")));
+        assert!(
+            report
+                .volumes
+                .iter()
+                .any(|v| v.mount_point == std::path::Path::new("/"))
+        );
         assert!(!report.notes.is_empty());
     }
 }

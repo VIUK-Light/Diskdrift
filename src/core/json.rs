@@ -6,15 +6,18 @@
 use crate::core::categories;
 use crate::core::diff::DiffResult;
 use crate::core::doctor::DoctorReport;
+use crate::core::duplicates::DuplicateReport;
 use crate::core::explain::{ExplainOutput, display_path};
 use crate::core::fs::{self, Accum};
 use crate::core::history::HistoryDay;
+use crate::core::large::LargeFile;
 use crate::core::local_snapshot::LocalSnapshot;
-use crate::core::system::SystemReport;
-use crate::core::volumes::VolumeInfo;
+use crate::core::recommendations::Recommendation;
 use crate::core::scan::ScanOutput;
 use crate::core::snapshot::{CatVal, EventDraft, EventRow, SnapshotMeta};
+use crate::core::system::SystemReport;
 use crate::core::time;
+use crate::core::volumes::VolumeInfo;
 use crate::core::what_happened::{Report, Window};
 use serde::Serialize;
 use std::path::Path;
@@ -865,10 +868,7 @@ pub struct PathSizeJson {
     pub label: &'static str,
 }
 
-fn path_size_json(
-    size: &crate::core::system::PathSize,
-    label: &'static str,
-) -> PathSizeJson {
+fn path_size_json(size: &crate::core::system::PathSize, label: &'static str) -> PathSizeJson {
     PathSizeJson {
         path: size.path.to_string_lossy().to_string(),
         allocated_bytes: size.allocated,
@@ -910,6 +910,148 @@ pub fn system(report: &SystemReport) -> SystemJson {
             .as_ref()
             .map(|size| path_size_json(size, "Likely reclaimable")),
         notes: report.notes.clone(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct LargeFileJson {
+    pub path: String,
+    pub allocated_bytes: u64,
+    pub logical_bytes: u64,
+}
+
+#[derive(Serialize)]
+pub struct LargeJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub min_size_bytes: u64,
+    pub files: Vec<LargeFileJson>,
+}
+
+pub fn large(files: &[LargeFile], min_size: u64) -> LargeJson {
+    LargeJson {
+        version: SCHEMA_VERSION,
+        command: "large",
+        timestamp: time::format_local(time::now_unix()),
+        min_size_bytes: min_size,
+        files: files
+            .iter()
+            .map(|file| LargeFileJson {
+                path: file.path.to_string_lossy().to_string(),
+                allocated_bytes: file.allocated,
+                logical_bytes: file.logical,
+            })
+            .collect(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct DuplicateFileJson {
+    pub path: String,
+    pub allocated_bytes: u64,
+    pub logical_bytes: u64,
+    pub hard_link: bool,
+}
+
+#[derive(Serialize)]
+pub struct DuplicateModelJson {
+    pub name: String,
+    pub quantization: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct DuplicateGroupJson {
+    pub hash: String,
+    pub logical_bytes: u64,
+    pub allocated_bytes: u64,
+    pub reclaimable_bytes: u64,
+    pub model: Option<DuplicateModelJson>,
+    pub files: Vec<DuplicateFileJson>,
+}
+
+#[derive(Serialize)]
+pub struct DuplicatesJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub files_considered: u64,
+    pub reclaimable_bytes: u64,
+    pub groups: Vec<DuplicateGroupJson>,
+}
+
+pub fn duplicates(report: &DuplicateReport, home: &Path) -> DuplicatesJson {
+    DuplicatesJson {
+        version: SCHEMA_VERSION,
+        command: "duplicates",
+        timestamp: time::format_local(time::now_unix()),
+        files_considered: report.files_considered,
+        reclaimable_bytes: report.reclaimable_total,
+        groups: report
+            .groups
+            .iter()
+            .map(|group| DuplicateGroupJson {
+                hash: group.hash.clone(),
+                logical_bytes: group.logical,
+                allocated_bytes: group.allocated,
+                reclaimable_bytes: group.reclaimable,
+                model: group.model.as_ref().map(|model| DuplicateModelJson {
+                    name: model.name.clone(),
+                    quantization: model.quantization.clone(),
+                }),
+                files: group
+                    .files
+                    .iter()
+                    .map(|file| DuplicateFileJson {
+                        path: display_path(&file.path, home),
+                        allocated_bytes: file.allocated,
+                        logical_bytes: file.logical,
+                        hard_link: file.hard_link,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct InsightJson {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub category_id: &'static str,
+    pub allocated_bytes: u64,
+    pub risk: &'static str,
+    pub what_is_it: &'static str,
+    pub recommendation: &'static str,
+    pub user_data: bool,
+}
+
+#[derive(Serialize)]
+pub struct RecommendationsJson {
+    pub version: u32,
+    pub command: &'static str,
+    pub timestamp: String,
+    pub insights: Vec<InsightJson>,
+}
+
+pub fn recommendations(insights: &[Recommendation]) -> RecommendationsJson {
+    RecommendationsJson {
+        version: SCHEMA_VERSION,
+        command: "recommendations",
+        timestamp: time::format_local(time::now_unix()),
+        insights: insights
+            .iter()
+            .map(|rec| InsightJson {
+                id: rec.id,
+                title: rec.title,
+                category_id: rec.category_id,
+                allocated_bytes: rec.allocated,
+                risk: rec.risk.label(),
+                what_is_it: rec.what_is_it,
+                recommendation: rec.recommendation,
+                user_data: rec.user_data,
+            })
+            .collect(),
     }
 }
 

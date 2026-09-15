@@ -11,6 +11,12 @@ final class AppModel: ObservableObject {
     @Published var whatHappened: WhatHappenedResult?
     @Published var system: SystemResult?
     @Published var systemMessage: String?
+    @Published var insights: RecommendationsResult?
+    @Published var insightsMessage: String?
+    @Published var largeFiles: LargeResult?
+    @Published var duplicates: DuplicatesResult?
+    @Published var duplicatesMessage: String?
+    @Published var duplicatesRunning = false
     @Published var isBusy = false
     @Published var status = "Ready"
     @Published var errorMessage: String?
@@ -56,6 +62,53 @@ final class AppModel: ObservableObject {
                     + formatBytes(result.snapshot.totalAllocatedBytes)
                 self.loadHistory(category: self.selectedHistoryCategory)
             })
+    }
+
+    func loadInsights() {
+        let home = self.home
+        isBusy = true
+        Task.detached(priority: .userInitiated) {
+            do {
+                let value = try Core.recommendations(home: home, dataDir: nil, path: nil, threads: 0)
+                let files = try Core.large(
+                    home: home, dataDir: nil, path: nil, limit: 20, minSize: 100_000_000)
+                await MainActor.run {
+                    self.insights = value
+                    self.largeFiles = files
+                    self.insightsMessage = nil
+                    self.isBusy = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.insights = nil
+                    self.insightsMessage = error.localizedDescription
+                    self.isBusy = false
+                }
+            }
+        }
+    }
+
+    func findDuplicates(minSize: UInt64, modelsOnly: Bool) {
+        let home = self.home
+        duplicatesRunning = true
+        duplicatesMessage = nil
+        Task.detached(priority: .userInitiated) {
+            do {
+                let value = try Core.duplicates(
+                    home: home, dataDir: nil, path: nil, limit: 30,
+                    minSize: minSize, modelsOnly: modelsOnly)
+                await MainActor.run {
+                    self.duplicates = value
+                    self.duplicatesRunning = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.duplicates = nil
+                    self.duplicatesMessage = error.localizedDescription
+                    self.duplicatesRunning = false
+                }
+            }
+        }
     }
 
     func loadSystem() {

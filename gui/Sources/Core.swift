@@ -121,6 +121,61 @@ struct WhatHappenedTotal: Decodable {
     let eventCount: Int
 }
 
+struct LargeFile: Decodable, Identifiable {
+    let path: String
+    let allocatedBytes: UInt64
+    let logicalBytes: UInt64
+    var id: String { path }
+}
+
+struct LargeResult: Decodable {
+    let files: [LargeFile]
+}
+
+struct DuplicateFile: Decodable, Identifiable {
+    let path: String
+    let allocatedBytes: UInt64
+    let logicalBytes: UInt64
+    let hardLink: Bool
+    var id: String { path }
+}
+
+struct DuplicateModel: Decodable {
+    let name: String
+    let quantization: String?
+}
+
+struct DuplicateGroup: Decodable, Identifiable {
+    let hash: String
+    let logicalBytes: UInt64
+    let allocatedBytes: UInt64
+    let reclaimableBytes: UInt64
+    let model: DuplicateModel?
+    let files: [DuplicateFile]
+    var id: String { hash }
+}
+
+struct DuplicatesResult: Decodable {
+    let filesConsidered: UInt64
+    let reclaimableBytes: UInt64
+    let groups: [DuplicateGroup]
+}
+
+struct Insight: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let categoryId: String
+    let allocatedBytes: UInt64
+    let risk: String
+    let whatIsIt: String
+    let recommendation: String
+    let userData: Bool
+}
+
+struct RecommendationsResult: Decodable {
+    let insights: [Insight]
+}
+
 struct SystemVolume: Decodable, Identifiable {
     let mountPoint: String
     let device: String
@@ -198,6 +253,45 @@ enum Core {
             try decode(
                 SnapshotResult.self,
                 from: call { dd_snapshot(cHome, cData, cPath, Int32(depth), Int32(threads)) }
+            )
+        }
+    }
+
+    static func large(
+        home: String?, dataDir: String?, path: String?, limit: Int, minSize: UInt64
+    ) throws -> LargeResult {
+        try withThree(home, dataDir, path) { cHome, cData, cPath in
+            try decode(
+                LargeResult.self,
+                from: call {
+                    dd_large(cHome, cData, cPath, Int32(limit), minSize)
+                }
+            )
+        }
+    }
+
+    static func duplicates(
+        home: String?, dataDir: String?, path: String?, limit: Int,
+        minSize: UInt64, modelsOnly: Bool
+    ) throws -> DuplicatesResult {
+        try withThree(home, dataDir, path) { cHome, cData, cPath in
+            try decode(
+                DuplicatesResult.self,
+                from: call {
+                    dd_duplicates(
+                        cHome, cData, cPath, Int32(limit), minSize, modelsOnly ? 1 : 0)
+                }
+            )
+        }
+    }
+
+    static func recommendations(
+        home: String?, dataDir: String?, path: String?, threads: Int
+    ) throws -> RecommendationsResult {
+        try withThree(home, dataDir, path) { cHome, cData, cPath in
+            try decode(
+                RecommendationsResult.self,
+                from: call { dd_recommendations(cHome, cData, cPath, Int32(threads)) }
             )
         }
     }

@@ -31,6 +31,18 @@ char *dd_scan(const char *home, const char *data_dir, const char *path,
 char *dd_snapshot(const char *home, const char *data_dir, const char *path,
                   int32_t depth, int32_t threads);
 
+/* Largest files under path (NULL = default locations). */
+char *dd_large(const char *home, const char *data_dir, const char *path,
+               int32_t limit, uint64_t min_size_bytes);
+
+/* Duplicate groups; models_only filters to .gguf/.safetensors. */
+char *dd_duplicates(const char *home, const char *data_dir, const char *path,
+                    int32_t limit, uint64_t min_size_bytes, int32_t models_only);
+
+/* Storage insights for the scanned categories. */
+char *dd_recommendations(const char *home, const char *data_dir,
+                         const char *path, int32_t threads);
+
 /* Deep macOS storage: volumes, local snapshots, VM/swap, system caches. */
 char *dd_system(const char *home, int32_t threads);
 

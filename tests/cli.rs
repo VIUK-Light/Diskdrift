@@ -722,17 +722,27 @@ fn system_volumes_and_macos_snapshots() {
     write_file(&home.join(".ollama/models/a.bin"), 1_000);
 
     let volumes = diskdrift(&home, &data, &["volumes", "--json"]);
-    assert!(volumes.status.success(), "{}", String::from_utf8_lossy(&volumes.stderr));
+    assert!(
+        volumes.status.success(),
+        "{}",
+        String::from_utf8_lossy(&volumes.stderr)
+    );
     let v = json(&volumes);
     assert_eq!(v["command"], "volumes");
-    assert!(v["volumes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|volume| volume["mount_point"] == "/"));
+    assert!(
+        v["volumes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|volume| volume["mount_point"] == "/")
+    );
 
     let system = diskdrift(&home, &data, &["system", "--json"]);
-    assert!(system.status.success(), "{}", String::from_utf8_lossy(&system.stderr));
+    assert!(
+        system.status.success(),
+        "{}",
+        String::from_utf8_lossy(&system.stderr)
+    );
     let v = json(&system);
     assert_eq!(v["command"], "system");
     assert!(!v["volumes"].as_array().unwrap().is_empty());
@@ -750,9 +760,116 @@ fn system_volumes_and_macos_snapshots() {
     assert!(String::from_utf8_lossy(&human.stdout).contains("macOS System Storage"));
 
     // `snapshot list` still lists DiskDrift's own snapshots.
-    assert!(diskdrift(&home, &data, &["snapshot", "--no-progress", "--root", home.to_str().unwrap()])
+    assert!(
+        diskdrift(
+            &home,
+            &data,
+            &[
+                "snapshot",
+                "--no-progress",
+                "--root",
+                home.to_str().unwrap()
+            ]
+        )
         .status
-        .success());
+        .success()
+    );
     let list = diskdrift(&home, &data, &["snapshot", "list", "--json"]);
     assert_eq!(json(&list)["snapshots"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn large_duplicates_and_recommendations() {
+    let tmp = TempDir::new("cli-tools");
+    let home = tmp.join("home");
+    let data = tmp.join("data");
+    write_file(&home.join(".ollama/models/a.bin"), 3_000_000);
+    write_file(&home.join("Downloads/a-copy.bin"), 3_000_000);
+    write_file(&home.join("Downloads/other.bin"), 2_000_000);
+    let root = home.to_string_lossy().to_string();
+
+    let large = diskdrift(
+        &home,
+        &data,
+        &[
+            "large",
+            "--json",
+            "--root",
+            &root,
+            "--min-size",
+            "1MB",
+            "--limit",
+            "5",
+        ],
+    );
+    assert!(
+        large.status.success(),
+        "{}",
+        String::from_utf8_lossy(&large.stderr)
+    );
+    let v = json(&large);
+    assert_eq!(v["command"], "large");
+    let files = v["files"].as_array().unwrap();
+    assert!(!files.is_empty());
+    assert!(files[0]["allocated_bytes"].as_u64().unwrap() >= 2_000_000);
+    assert!(
+        files[0]["allocated_bytes"].as_u64().unwrap()
+            >= files[files.len() - 1]["allocated_bytes"].as_u64().unwrap()
+    );
+
+    let duplicates = diskdrift(
+        &home,
+        &data,
+        &["duplicates", "--json", "--root", &root, "--min-size", "1MB"],
+    );
+    assert!(
+        duplicates.status.success(),
+        "{}",
+        String::from_utf8_lossy(&duplicates.stderr)
+    );
+    let v = json(&duplicates);
+    assert_eq!(v["command"], "duplicates");
+    let groups = v["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{v}");
+    assert_eq!(groups[0]["files"].as_array().unwrap().len(), 2);
+    assert!(v["reclaimable_bytes"].as_u64().unwrap() >= 3_000_000);
+    let human = diskdrift(
+        &home,
+        &data,
+        &["duplicates", "--root", &root, "--min-size", "1MB"],
+    );
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("Duplicate files"), "{text}");
+    assert!(text.contains("Potential duplicate"), "{text}");
+
+    let recommendations = diskdrift(
+        &home,
+        &data,
+        &[
+            "recommendations",
+            "--json",
+            "--root",
+            &root,
+            "--threads",
+            "2",
+        ],
+    );
+    assert!(
+        recommendations.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recommendations.stderr)
+    );
+    let v = json(&recommendations);
+    assert_eq!(v["command"], "recommendations");
+    assert!(
+        v["insights"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|insight| insight["category_id"] == "ai.ollama")
+    );
+    let human = diskdrift(&home, &data, &["recommendations", "--root", &root]);
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("Storage Insights"), "{text}");
+    assert!(text.contains("never deletes files"), "{text}");
 }

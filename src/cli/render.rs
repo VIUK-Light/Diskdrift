@@ -3,15 +3,18 @@
 use crate::core::categories;
 use crate::core::diff::DiffResult;
 use crate::core::doctor::DoctorReport;
+use crate::core::duplicates::DuplicateReport;
 use crate::core::explain::{ExplainOutput, display_path};
 use crate::core::fs;
 use crate::core::history::HistoryDay;
+use crate::core::large::LargeFile;
 use crate::core::local_snapshot::LocalSnapshot;
-use crate::core::system::SystemReport;
-use crate::core::volumes::VolumeInfo;
+use crate::core::recommendations::Recommendation;
 use crate::core::scan::ScanOutput;
 use crate::core::size;
 use crate::core::snapshot::{CatVal, EventRow, SnapshotMeta};
+use crate::core::system::SystemReport;
+use crate::core::volumes::VolumeInfo;
 use crate::core::what_happened::{Report, Window};
 use std::io::{self, Write};
 use std::path::Path;
@@ -390,6 +393,118 @@ pub fn render_doctor<W: Write>(w: &mut W, d: &DoctorReport, home: &Path) -> io::
     Ok(())
 }
 
+pub fn render_large<W: Write>(
+    w: &mut W,
+    files: &[LargeFile],
+    home: &Path,
+    min_size: u64,
+) -> io::Result<()> {
+    writeln!(
+        w,
+        "Largest files (at least {})",
+        size::format_bytes(min_size)
+    )?;
+    writeln!(w)?;
+    if files.is_empty() {
+        writeln!(w, "No files found above the minimum size.")?;
+        return Ok(());
+    }
+    for (i, file) in files.iter().enumerate() {
+        writeln!(
+            w,
+            "{:>4}. {:>12}  {}",
+            i + 1,
+            size::format_bytes(file.allocated),
+            display_path(&file.path, home)
+        )?;
+    }
+    Ok(())
+}
+
+pub fn render_duplicates<W: Write>(
+    w: &mut W,
+    report: &DuplicateReport,
+    home: &Path,
+) -> io::Result<()> {
+    writeln!(w, "Duplicate files")?;
+    writeln!(w)?;
+    if report.groups.is_empty() {
+        writeln!(w, "No duplicates found above the minimum size.")?;
+        return Ok(());
+    }
+    writeln!(
+        w,
+        "{} groups · potentially reclaimable ~{}",
+        report.groups.len(),
+        size::format_bytes(report.reclaimable_total)
+    )?;
+    writeln!(w)?;
+    for (i, group) in report.groups.iter().enumerate() {
+        let title = match &group.model {
+            Some(model) => match &model.quantization {
+                Some(quant) => format!("{} ({quant})", model.name),
+                None => model.name.clone(),
+            },
+            None => format!("{} bytes", size::format_bytes(group.logical)),
+        };
+        writeln!(
+            w,
+            "{}. {} × {} · {}",
+            i + 1,
+            size::format_bytes(group.allocated),
+            group.files.len(),
+            title
+        )?;
+        for file in &group.files {
+            let suffix = if file.hard_link { "  (hard link)" } else { "" };
+            writeln!(w, "   {}{}", display_path(&file.path, home), suffix)?;
+        }
+        writeln!(
+            w,
+            "   Potential duplicate: {}",
+            size::format_bytes(group.reclaimable)
+        )?;
+        writeln!(w)?;
+    }
+    writeln!(w, "DiskDrift never deletes files.")?;
+    Ok(())
+}
+
+pub fn render_recommendations<W: Write>(w: &mut W, insights: &[Recommendation]) -> io::Result<()> {
+    writeln!(w, "Storage Insights")?;
+    writeln!(w)?;
+    if insights.is_empty() {
+        writeln!(w, "Nothing to report yet. Run a scan first.")?;
+        return Ok(());
+    }
+    for insight in insights {
+        writeln!(
+            w,
+            "{:<34}{:>12}   {}",
+            insight.title,
+            size::format_bytes(insight.allocated),
+            insight.risk.label().to_uppercase()
+        )?;
+        for line in wrap(insight.what_is_it, 72) {
+            writeln!(w, "  {line}")?;
+        }
+        let recommendation_lines = wrap(insight.recommendation, 70);
+        for (index, line) in recommendation_lines.iter().enumerate() {
+            if index == 0 {
+                writeln!(w, "  Recommendation: {line}")?;
+            } else {
+                writeln!(w, "                  {line}")?;
+            }
+        }
+        if insight.user_data {
+            writeln!(w, "  May contain user data — review before acting.")?;
+        }
+        writeln!(w)?;
+    }
+    writeln!(w, "DiskDrift never deletes files.")?;
+    Ok(())
+}
+
 pub fn render_volumes<W: Write>(w: &mut W, volumes: &[VolumeInfo]) -> io::Result<()> {
     writeln!(w, "Volumes")?;
     writeln!(w)?;
@@ -413,17 +528,11 @@ pub fn render_volumes<W: Write>(w: &mut W, volumes: &[VolumeInfo]) -> io::Result
     Ok(())
 }
 
-pub fn render_local_snapshots<W: Write>(
-    w: &mut W,
-    snapshots: &[LocalSnapshot],
-) -> io::Result<()> {
+pub fn render_local_snapshots<W: Write>(w: &mut W, snapshots: &[LocalSnapshot]) -> io::Result<()> {
     writeln!(w, "macOS local snapshots")?;
     writeln!(w)?;
     if snapshots.is_empty() {
-        writeln!(
-            w,
-            "No local snapshots found (or tmutil is unavailable)."
-        )?;
+        writeln!(w, "No local snapshots found (or tmutil is unavailable).")?;
         return Ok(());
     }
     writeln!(

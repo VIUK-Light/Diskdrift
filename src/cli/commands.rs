@@ -1,8 +1,9 @@
 //! Command implementations.
 
 use crate::cli::args::{
-    Command, CommonArgs, DiffArgs, EventsArgs, ExplainArgs, HistoryArgs, ScanArgs,
-    SnapshotDeleteArgs, SnapshotShowArgs, TopArgs, WatchArgs, WhatHappenedArgs,
+    Command, CommonArgs, DiffArgs, DuplicatesArgs, EventsArgs, ExplainArgs, HistoryArgs, LargeArgs,
+    RecommendationsArgs, ScanArgs, SnapshotDeleteArgs, SnapshotShowArgs, TopArgs, WatchArgs,
+    WhatHappenedArgs,
 };
 use crate::cli::progress::Progress;
 use crate::cli::render;
@@ -10,17 +11,20 @@ use crate::core::categories;
 use crate::core::config::Config;
 use crate::core::diff;
 use crate::core::doctor;
+use crate::core::duplicates;
 use crate::core::error::{Error, Result};
 use crate::core::explain::{self, ResolvedQuery};
 use crate::core::fs::ProgressCounters;
 use crate::core::history;
-use crate::core::local_snapshot;
-use crate::core::system;
 use crate::core::json;
+use crate::core::large;
+use crate::core::local_snapshot;
 use crate::core::paths;
+use crate::core::recommendations;
 use crate::core::scan::{self, ScanConfig, ScanTarget};
 use crate::core::size;
 use crate::core::store::Store;
+use crate::core::system;
 use crate::core::time;
 use crate::core::volumes;
 use crate::core::watch::{self, WatchEntry, WatchState};
@@ -48,6 +52,9 @@ pub fn run(cmd: Command) -> Result<i32> {
         Command::Watch(args) => cmd_watch(args),
         Command::Events(args) => cmd_events(args),
         Command::WhatHappened(args) => cmd_what_happened(args),
+        Command::Large(args) => cmd_large(args),
+        Command::Duplicates(args) => cmd_duplicates(args),
+        Command::Recommendations(args) => cmd_recommendations(args),
         Command::SnapshotShow(args) => cmd_snapshot_show(args),
         Command::SnapshotDelete(args) => cmd_snapshot_delete(args),
         Command::Explain(args) => cmd_explain(args),
@@ -402,6 +409,96 @@ fn cmd_history(args: HistoryArgs) -> Result<i32> {
         let stdout = io::stdout();
         let mut w = stdout.lock();
         render::render_history(&mut w, &days, category_name)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
+fn cmd_large(args: LargeArgs) -> Result<i32> {
+    let home = resolve_home();
+    let data_dir = resolve_data_dir(&args.common, &home);
+    let config = load_config(&args.common, &home)?;
+    let targets = resolve_scan_targets(&home, args.path.as_deref(), &args.roots)?;
+    let paths: Vec<PathBuf> = targets.iter().map(|target| target.path.clone()).collect();
+    let min_size = args
+        .min_size
+        .as_deref()
+        .and_then(size::parse_size)
+        .unwrap_or(10_000_000);
+    let mut exclusions = vec![data_dir];
+    exclusions.extend(config.exclude.iter().cloned());
+
+    let files = large::largest_files(&paths, args.limit, min_size, &exclusions);
+    if args.common.json {
+        println!("{}", json::to_pretty(&json::large(&files, min_size)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_large(&mut w, &files, &home, min_size)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
+fn cmd_duplicates(args: DuplicatesArgs) -> Result<i32> {
+    let home = resolve_home();
+    let data_dir = resolve_data_dir(&args.common, &home);
+    let config = load_config(&args.common, &home)?;
+    let targets = resolve_scan_targets(&home, args.path.as_deref(), &args.roots)?;
+    let paths: Vec<PathBuf> = targets.iter().map(|target| target.path.clone()).collect();
+    let min_size = args
+        .min_size
+        .as_deref()
+        .and_then(size::parse_size)
+        .unwrap_or(1_000_000);
+    let mut exclusions = vec![data_dir];
+    exclusions.extend(config.exclude.iter().cloned());
+
+    let report =
+        duplicates::find_duplicates(&paths, min_size, args.limit, args.models, &exclusions);
+    if args.common.json {
+        println!("{}", json::to_pretty(&json::duplicates(&report, &home)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_duplicates(&mut w, &report, &home)?;
+        w.flush()?;
+    }
+    Ok(EXIT_OK)
+}
+
+fn cmd_recommendations(args: RecommendationsArgs) -> Result<i32> {
+    let home = resolve_home();
+    let data_dir = resolve_data_dir(&args.common, &home);
+    let config = load_config(&args.common, &home)?;
+    let targets = resolve_scan_targets(&home, args.path.as_deref(), &args.roots)?;
+    let mut exclusions = vec![data_dir];
+    exclusions.extend(config.exclude.iter().cloned());
+
+    let counters = Arc::new(ProgressCounters::new());
+    let progress_enabled = !args.common.json && !args.common.no_progress;
+    let progress = Progress::start(counters.clone(), progress_enabled);
+    let out = scan::run(ScanConfig {
+        home: &home,
+        targets,
+        threads: args
+            .threads
+            .or(config.threads)
+            .unwrap_or_else(scan::default_threads),
+        progress: Some(&counters),
+        exclusions,
+        depth_override: None,
+    });
+    drop(progress);
+
+    let rolled = crate::core::fs::rollup_categories(&out.walk.categories);
+    let insights = recommendations::recommendations(&rolled);
+    if args.common.json {
+        println!("{}", json::to_pretty(&json::recommendations(&insights)));
+    } else {
+        let stdout = io::stdout();
+        let mut w = stdout.lock();
+        render::render_recommendations(&mut w, &insights)?;
         w.flush()?;
     }
     Ok(EXIT_OK)

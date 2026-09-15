@@ -135,12 +135,15 @@ macOS 11+). Unsigned `.app.zip` archives are also attached to
 [Releases](https://github.com/VIUK-Light/Diskdrift/releases); unzip, move to
 `/Applications` and right-click → Open the first time.
 
-The GUI has four screens plus a resident menu bar:
+The GUI has seven screens plus a resident menu bar:
 
 - **Dashboard** — volume usage, last 24 hours growth, "Scan now" / "Take snapshot"
 - **Storage** — category bars and the largest tracked directories
 - **History** — day-over-day changes per category (needs snapshots)
 - **What Happened** — incidents from the watch event log
+- **System** — volumes, local snapshots, VM/swap, system caches
+- **Duplicates** — size → partial hash → full hash, with model awareness
+- **Insights** — recommendations with risk levels and the largest files
 - **Menu bar** — free space, today's change or disk usage in the menu bar,
   with a panel showing the biggest growth and a local alert when free space
   is low or storage grows faster than your thresholds (Settings, ⌘,)
@@ -205,6 +208,9 @@ diskdrift snapshot delete <id> [--yes]
 diskdrift snapshots [--json]                     macOS local snapshots
 diskdrift volumes [--json]                       mounted volumes
 diskdrift system [--json]                        volumes, snapshots, VM/swap, caches
+diskdrift large [<path>] [--min-size <size>] [--limit <n>] [--json]
+diskdrift duplicates [<path>] [--models] [--min-size <size>] [--limit <n>] [--json]
+diskdrift recommendations [<path>] [--json]
 diskdrift diff [<old>] [<new>] [--json] [--top <n>]
 diskdrift diff --since <duration> [--json] [--top <n>]
 diskdrift history [<category>] [--json]
@@ -488,6 +494,37 @@ Disk usage increased by 23.7 GB (412 events).
 
 `--since` and `--from`/`--to` are mutually exclusive. `--from`/`--to` accept
 local `HH:MM` (or `HH:MM:SS`) and handle windows that cross midnight.
+
+### large / duplicates / recommendations
+
+```bash
+diskdrift large --min-size 100MB --limit 10
+diskdrift duplicates --min-size 10MB
+diskdrift duplicates --models
+diskdrift recommendations
+```
+
+```text
+Duplicate files
+
+1 groups · potentially reclaimable ~5.2 GB
+
+1. 5.2 GB × 2 · Qwen3-8B (Q4_K_M)
+   ~/.lmstudio/models/Qwen3-8B-Q4_K_M.gguf
+   ~/Downloads/Qwen3-8B-Q4_K_M.gguf
+   Potential duplicate: 5.2 GB
+
+DiskDrift never deletes files.
+```
+
+- `large` keeps only a top-N heap in memory and de-duplicates hard links.
+- `duplicates` escalates cheaply: **size → partial hash (64 KiB) → full
+  SHA-256**. Only same-size, same-prefix candidates are fully hashed. Hard
+  links are never counted as reclaimable. `--models` recognises GGUF and
+  safetensors files and splits the quantization suffix (e.g. `Q4_K_M`).
+- `recommendations` explains what each area is, labels the risk
+  (informational / low / medium / high) and suggests a review — it never
+  deletes.
 
 ### explain
 
