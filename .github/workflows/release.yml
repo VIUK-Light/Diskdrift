@@ -1,14 +1,22 @@
 name: Release
+run-name: Release ${{ inputs.tag || github.ref_name }}
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example, v1.0.0)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -25,7 +33,17 @@ jobs:
             arch: x86_64
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Validate release tag
+        run: |
+          if [[ "$RELEASE_TAG" != v* ]]; then
+            echo "::error::Release tag must start with v"
+            exit 1
+          fi
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Install Rust toolchain
         run: |
@@ -53,11 +71,11 @@ jobs:
             --arch ${{ matrix.arch }} \
             --lib "target/${{ matrix.target }}/release" \
             --out dist/DiskDrift.app \
-            --version "${GITHUB_REF_NAME#v}"
+            --version "${RELEASE_TAG#v}"
 
       - name: Package archives and checksums
         run: |
-          tag="${GITHUB_REF_NAME}"
+          tag="${RELEASE_TAG}"
           name="diskdrift-${tag}-${{ matrix.target }}"
           gui="DiskDrift-${tag}-${{ matrix.target }}"
           work="dist/${name}"
@@ -96,9 +114,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="$GITHUB_REF_NAME"
+          tag="$RELEASE_TAG"
+          latest_args=()
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            latest_args+=(--latest=false)
+          fi
           ls -l dist
-          gh release create "$tag" \
+          gh release create "$tag" "${latest_args[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --title "DiskDrift $tag" \
             --notes-file - \
